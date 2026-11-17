@@ -117,7 +117,22 @@ total. `correlations_detail.csv` keeps every row of the analysis, with the unshr
 games; the table's `same_team` or `opp` value for the two roles within a game), repair it if needed, draw `z ~ N(0, R)` (as `g @ R^(1/2)` with the PRINCIPAL square root `V sqrt(W) V^T`, not `V sqrt(W)`: the eigenvector signs `eigh` returns differ between LAPACK builds, and with them the draws for one seed, whereas the principal root is the same matrix whichever signs or basis it was built from, so a seed means the same draws on every machine), take `u = Phi(z)`, and read each player's
 points off his own quantile function at `u`. Every player therefore keeps exactly his own marginal and every
 pair inherits `R`. **The same player in two lineups is one variable**, so lineups that share players are
-correlated with each other the way real ones are. `R` is assembled from separately estimated pairs, so it can in
+correlated with each other the way real ones are.
+
+**Common random numbers** (2026-11-17, after Phase E). `R` is 0 across games, so `z` is drawn **game by game**:
+each game's players in id order, from a generator seeded by `(seed, CRC-32 of the game id)`; the block is assembled,
+repaired and rooted on its own (the same repair as the whole matrix's: clipping eigenvalues is a function of the
+matrix). The builder (`lineup_suggest.score`, `with_shown_cash`), the double-up line retro and the curse study pass
+every player they hold a spec for as the run's **universe** (`simulate_lineups(..., universe=...)`): those players are
+drawn whether or not a lineup holds them. So a lineup's simulated numbers depend only on the lineup, the slate and the
+seed: not on the order the lineups arrive in, nor on which other lineups were simulated beside it (before, a player's
+draws were the column he first appeared in, so two tied lineups kept in another order moved the GPP Top 1% ranking).
+A lineup's points are summed in id order, so its seat order does not matter either. Without a universe (late swap,
+the Lineups tab) a game's draws are those of the players present, still in id order: the order never matters there.
+`tests/sim/test_common_draws.py` shuffles the lineups and checks every number. On Weeks 2 and 4-9 (today's settings,
+both solvers) every candidate scored twice more in shuffled order: 0 of 19,680 rescored lineups differ (before: all
+of them). The finished search and the exact search now pick the same GPP builds in 71 of 76 (before: 59 of 73); the
+cash builds and the Default's band word are unchanged in every week; the calibrated double-up offset stays +9.5. `R` is assembled from separately estimated pairs, so it can in
 principle fail to be a valid correlation matrix: it is repaired to the nearest positive semi-definite matrix by
 **eigenvalue clipping and rescaling** (`SimResult.repair` records whether that happened and the largest entry
 it moved). Two different players in the same role on one team (two RB3s) borrow the neighbouring role's pair
@@ -687,8 +702,9 @@ cash builds. Against a line that moves with the field the lineup that wins is th
    95% of the total ownership** (`[sim.lines] own_coverage`), taking the higher of the two contest types' needs. They
    join the same Gaussian-copula draw, so a player in both a lineup and the field is **one random variable**: a lineup
    of chalk is correlated with the line it is measured against, and a lineup of strangers is not.
-3. **The field mean, per draw** = `sum of own_i x X_i` over the simulated field players, plus the **tail** (the
-   remaining ownership, under 5%) at each tail player's *expected* points (the mean of his own quantile function; a
+3. **The field mean, per draw** = `sum of own_i x X_i` over the covered field players, plus the **tail** (the
+   remaining ownership, under 5%) at each tail player's *expected* points, even when a lineup holds a tail player
+   (since common random numbers: with a universe, the lines then do not depend on which lineups are simulated) (the mean of his own quantile function; a
    constant per run). Leaving the tail out would bias the line down by about 5% of the slate's points; rescaling the
    covered weights up to 9 would bias it up (the uncovered are the low scorers).
 4. **The lines, per draw:** `Cash %` = P(lineup >= field mean + `double_up_offset`) and the top-end column =
@@ -2073,7 +2089,7 @@ appear in the candidate list, and in the three weeks where a swap moved a player
 ranking, which counts a handful of draws in 5,000, picked other builds (3 of 8, 7 of 10 and 5 of 10 the same); in the weeks where no
 player moved (4, 6, 8, 9) the builds are identical but one. So the search is no longer where a build's noise comes from; the
 simulator's ranking of rare events is (a canonical draw order would remove that last dependence; not done here, it would change
-every simulated number).
+every simulated number). **Since done**: common random numbers (section 6), every simulated number moved once.
 
 **The FADE-ban Flashback, rerun** (`research/settings/calls_fade_gpp_exact.toml` against `today_gpp_exact.toml`, Weeks 2 and 4-9,
 35 GPP contests; blueprint R6). No "search cut short" note on either side.

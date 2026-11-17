@@ -176,10 +176,13 @@ def test_fixed_lines_reproduce_the_numbers_from_before_relative_lines_exactly():
     lineups = [[specs[n] for n in GOLDEN_A], [specs[n] for n in GOLDEN_B]]
     plain = simulate_lineups(lineups, n_sims=20000, seed=0, cash_line=130.0, gpp_target=170.0)
     a, b = plain.lineups
-    assert (a.p_cash, a.p_gpp) == (0.1214, 0.0051) and (b.p_cash, b.p_gpp) == (0.0929, 0.00425)
-    assert a.mean == pytest.approx(102.20139669838329, abs=1e-6)
-    assert b.mean == pytest.approx(95.36954786249463, abs=1e-6)
-    assert (plain.p_any_cash, plain.p_any_gpp, plain.expected_cashing) == (0.20375, 0.00925, 0.2143)
+    # Common random numbers (2026-11-17) re-drew every number once, inside the sampling noise (20,000 draws:
+    # SE about 0.0023 on a Cash % near 12%, 0.18 pts on a mean). Before: (0.1214, 0.0051), (0.0929, 0.00425),
+    # means 102.201 / 95.370, portfolio (0.20375, 0.00925, 0.2143).
+    assert (a.p_cash, a.p_gpp) == (0.1222, 0.00465) and (b.p_cash, b.p_gpp) == (0.09405, 0.0037)
+    assert a.mean == pytest.approx(102.37836458503912, abs=1e-6)
+    assert b.mean == pytest.approx(95.07906627800493, abs=1e-6)
+    assert (plain.p_any_cash, plain.p_any_gpp, plain.expected_cashing) == (0.20545, 0.0083, 0.21625)
     assert plain.lines == "fixed" and plain.cash_line == 130.0 and plain.gpp_target == 170.0
     # and `--fixed-lines` is exactly that call: no field, the typed median and gpp_target
     owned = edge.assign(**{"Own%": 1.0 / len(edge) * 9})

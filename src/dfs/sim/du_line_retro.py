@@ -203,7 +203,9 @@ def simulate_week(
         kept.append(tuple(sorted(lu)))
         lists.append(spec_list)
     has_herd = bool(herd) and kept and kept[-1] == tuple(sorted(herd))
-    result = simulate_lineups(lists, n_sims=n_sims, seed=ls.SEED, field=lines.field, keep_scores=True)
+    result = simulate_lineups(
+        lists, n_sims=n_sims, seed=ls.SEED, field=lines.field, keep_scores=True, universe=specs.values()
+    )
     scores = result.scores
     offset = float(lines.field.cash_offset)
     return WeekDraws(
@@ -295,7 +297,7 @@ class Retro:
 
 # Each simulated week is kept (`data/research/du_line/weeks/`, gitignored), so the weekly refresh only
 # simulates the week just closed. Bump the version when anything that feeds a week's draws changes.
-WEEK_CACHE_VERSION = 3
+WEEK_CACHE_VERSION = 4  # 4: common random numbers (draws keyed by game, the slate as the universe)
 
 
 def _week_cache_path(week: int, n_sims: int, seed: int) -> Path:

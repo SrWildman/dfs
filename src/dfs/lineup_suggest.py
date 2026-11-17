@@ -394,7 +394,9 @@ def with_shown_cash(
     ]
     if not rated:
         return builds
-    result = simulate_lineups([s for _, s in rated], n_sims=n_sims, seed=seed, field=field)
+    result = simulate_lineups(
+        [s for _, s in rated], n_sims=n_sims, seed=seed, field=field, universe=specs.values()
+    )
     out = list(builds)
     for (i, _), stats in zip(rated, result.lineups, strict=True):
         out[i] = replace(out[i], p_cash=float(stats.p_cash))
@@ -413,8 +415,10 @@ def score(
     field: FieldModel | None = None,
 ) -> list[Scored]:
     """Simulate every lineup in ONE run (a player in two lineups has the same draws in both) and return them
-    with their odds. A lineup with a player the simulator has no spec for is left out. With a `field` the
-    odds are against the field's lines (Cash % and Top 1%), else against `cash_line` / `gpp_target`."""
+    with their odds. Every player of `specs` is the run's universe (`simulate_lineups`), so a lineup's odds
+    depend only on the lineup and the slate, never on which other lineups were scored or in what order. A
+    lineup with a player the simulator has no spec for is left out. With a `field` the odds are against the
+    field's lines (Cash % and Top 1%), else against `cash_line` / `gpp_target`."""
     from dfs.sim.simulate import simulate_lineups
 
     seated = [seat(lineup, kickoff) for lineup in lineups]
@@ -432,6 +436,7 @@ def score(
         cash_line=cash_line,
         gpp_target=gpp_target,
         field=field,
+        universe=specs.values(),  # common random numbers: a lineup's draws do not depend on the others
     )
     return [
         Scored(
