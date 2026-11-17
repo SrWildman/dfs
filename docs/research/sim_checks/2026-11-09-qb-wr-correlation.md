@@ -1,5 +1,7 @@
 # Plan S, check 2: the QB-receiver correlation, re-checked (2026-11-09)
 
+*The script (`sim/qbwr_check.py`) was removed in removal batch F2 (Nov 2026); it is last on main at `42e3362`.*
+
 **Verdict: the shipped correlation table stays as it is.** The method is not what keeps QB1-WR1 near +0.31: every
 residual method lands between +0.32 and +0.35 when fitted on 2014-2022. Only raw points reach +0.39, and raw points mix
 in the projections' own correlation. The friend's hand-set 0.45 matches the held-out joint-90th count best, but only by

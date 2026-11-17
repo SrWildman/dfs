@@ -19,7 +19,8 @@ the export: "top 12%") or, with no export, an approximation from the measured of
 The position is bucketed by its chance of finishing above the top-1% line (`bucket_of`): `ahead` at 10% or
 more, `near` from 1% to 10%, `behind` below 1% (by the gap in the line's own spread nearly every lineup is
 "behind" at 1 pm: the median sampled GPP lineup is 60 points under the line and the spread of the gap is a few
-points); `late_swap_retro` reports, per bucket, how often the swap that maximises Top 1% is a LEVERAGE one.
+points); the late-swap retro (removed, last on main at `42e3362`) reported, per bucket, how often the swap
+that maximises Top 1% is a LEVERAGE one.
 
 Pure: the draws, the lines and the ownership come in as arguments.
 """
