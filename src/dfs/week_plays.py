@@ -126,8 +126,10 @@ def floor_per_k(row: dict) -> float | None:
     return floor / (sal / 1000) if floor is not None and sal > 0 else None
 
 
-def cash_core(at: list[dict], pos: str, *, per: int | None = None) -> list[tuple[dict, bool]]:
-    """One position's cash core, as `(row, chalk_core)`: the top `CASH_CORE_CAP[pos]` (and at most `per`) by
+def cash_core_guess(at: list[dict], pos: str, *, per: int | None = None) -> list[tuple[dict, bool]]:
+    """One position's cash core GUESS, before the first build (once `dfs lineups suggest` has run, the board's
+    Cash core is the real one: `cash_core.py`'s players in 70%+ of the near-optimal lineups), as
+    `(row, chalk_core)`: the top `CASH_CORE_CAP[pos]` (and at most `per`) by
     Floor per $1K among the players at least the position's median CalPts, then every 30%+ CashOwn player
     the caps left out. A player on both lists is chalk core (flagged True), in his Floor-per-$1K place."""
     cap = CASH_CORE_CAP.get(pos, PER_POSITION)
@@ -362,7 +364,7 @@ def plays(
         by_value = _top(at, lambda r: (-(value_per_k(r) or 0.0), -(num(r.get("CalPts")) or 0.0)), per)
         value[pos] = [make_play(r, "value", pool=pool) for r in by_value]
         cash[pos] = []
-        for r, chalk_core in cash_core(at, pos, per=per):
+        for r, chalk_core in cash_core_guess(at, pos, per=per):
             play = make_play(r, "cash", pool=pool)
             play.chalk_core = chalk_core
             cash[pos].append(play)

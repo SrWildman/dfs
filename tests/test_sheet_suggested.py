@@ -96,8 +96,7 @@ def test_each_build_is_a_bar_a_header_nine_player_rows_and_a_total_row_then_a_bl
         "Own%",
         "Typical",
         "Big night",
-        "Cash %",
-        "Top 1%",
+        "Top 1%",  # no Cash % column (blueprint Phase A)
         "GameID",  # the hidden helper the stack tints group by
         "Yours",  # the hidden helper behind the "your pick" tint
     ]
@@ -114,7 +113,10 @@ def test_each_build_is_a_bar_a_header_nine_player_rows_and_a_total_row_then_a_bl
     assert (
         layout.rows[total - 1][col("Own%")] == round(sum(o for o in own if o != ""), 4) > 0
     )  # total ownership
-    assert layout.rows[total - 1][col("Typical") : col("Top 1%") + 1] == [131.3, 166.0, 0.512, 0.0432]
+    # a cash build's Total row carries no percentage at all
+    assert layout.rows[total - 1][col("Typical") : col("Top 1%") + 1] == [131.3, 166.0, ""]
+    gpp_total = layout.total_rows[1]
+    assert layout.rows[gpp_total - 1][col("Top 1%")] == 0.0432
     assert layout.rows[total] == [""] * ss.COLUMN_COUNT  # a blank row between blocks
     assert layout.bar_rows[1] == total + 2
     assert layout.rows[layout.bar_rows[1] - 1][:4] == [
@@ -271,7 +273,7 @@ def test_the_writer_clears_every_old_border_and_format_on_the_whole_grid_first()
     assert client.cleared_validation.endswith("1000")
 
 
-def test_the_writer_rebuilds_the_tab_and_greens_cash_percent_at_fifty_and_top_one_percent_at_two():
+def test_the_writer_rebuilds_the_tab_and_greens_top_one_percent_at_two_and_shows_no_cash_percent():
     cash = _build(1, "cash", "Cash build 1")
     client = _Client(exists=True)
     message = ss.write_suggested(
@@ -281,21 +283,21 @@ def test_the_writer_rebuilds_the_tab_and_greens_cash_percent_at_fifty_and_top_on
     total = ss.build_layout(
         _report(cash), _edge([cash]), metric="CalPts", cash_line=143.9, gpp_target=190.0
     ).total_rows[0]
-    assert (f"L{total}", "NUMBER_GREATER_THAN_EQ", ["0.5"]) in client.rules
-    assert (f"M{total}", "NUMBER_GREATER_THAN_EQ", ["0.02"]) in client.rules
+    assert (f"L{total}", "NUMBER_GREATER_THAN_EQ", ["0.02"]) in client.rules
+    assert not any(values == ["0.5"] for _, _, values in client.rules)  # the old Cash % green is gone
     assert client.widths["C"] == 170  # the Name column (the lock column is B)
-    assert client.hidden == ("N", "O")  # the GameID and Yours helpers
+    assert client.hidden == ("M", "N")  # the GameID and Yours helpers
     # Lineups' three correlation tints over the build's Name and Team cells (C:D); Slot is the position
     first_player = total - 9
     assert {spec["a1_range"] for spec in client.tints} == {f"C{first_player}:D{total - 1}"}
     assert len(client.tints) == 3 and "$A" in client.tints[0]["values"][0]  # the Slot column
-    assert any(rng == f"L{total}" and fmt["numberFormat"]["pattern"] == "0%" for rng, fmt in client.formats)
+    assert any(rng == f"L{total}" and fmt["numberFormat"]["pattern"] == "0.0%" for rng, fmt in client.formats)
     # the controls: a checkbox per player run, a decision dropdown on the bar, the "your pick" rule on top
     assert client.checkboxes == [f"B{first_player}:B{total - 1}"]
     bar = first_player - 2
     assert client.dropdowns == [(f"C{bar}", ss.DECISION_OPTIONS, False)]  # Vary N is typed, so non-strict
-    assert (f"C{first_player}:C{total - 1}", "CUSTOM_FORMULA", [f"=$O{first_player}=TRUE"]) in client.rules
-    assert client.cleared_validation.startswith("A1:O")  # last run's ticks and dropdowns go first
+    assert (f"C{first_player}:C{total - 1}", "CUSTOM_FORMULA", [f"=$N{first_player}=TRUE"]) in client.rules
+    assert client.cleared_validation.startswith("A1:N")  # last run's ticks and dropdowns go first
 
 
 def test_the_typed_columns_are_the_lock_column_and_the_name_column_and_the_rules_box_sits_above_the_builds():
@@ -412,3 +414,57 @@ def test_a_bar_adds_the_ownership_sum_and_product_and_the_share_when_the_build_h
         ss.bar_text(owned) == "GPP build 2  ·  DET stack  ·  own 116%, product 1.2e-08  ·  Top 1% share 0.31%"
     )
     assert "Top 1% share" not in ss.bar_text(replace(owned, objective=None))  # a cash build has none
+
+
+# -- blueprint Phase A: the OPEN SPOTS block and the band --------------------------------------------------
+
+
+def _with_core(report, cash):
+    """`report` with a Default (the cash build) whose FLEX is an open spot with one alternative."""
+    from dfs import cash_core as cc
+
+    players = [
+        SwapPlayer(p.name, p.position, p.team, p.opp, f"g{i}", p.salary, 10.0)
+        for i, p in enumerate(cash.players)
+    ]
+    alt = SwapPlayer("ALT WR", "WR", "DET", "ARI", "g9", players[7].salary - 300, 9.5)
+    other = [*players[:7], alt, players[8]]
+    report.cash_core = cc.cash_core([players, other], [*players, alt], cap=60000, kickoff={})
+    report.cash_band = cc.band(0.6, (14, 25), 9.5).text
+    return report
+
+
+def test_the_open_spots_block_sits_above_the_builds_and_the_tab_reads_back_exactly_as_before():
+    cash, gpp = _build(1, "cash", "Cash build 1"), _build(2, "gpp", "GPP build 2  ·  DET stack", tag="ARI")
+    rules = {"Always use": "cash: DET QB0", "Never use": "gpp: ARI QB0"}
+    plain = _report(cash, gpp)
+    plain.rules = rules
+    spotted = _with_core(_report(cash, gpp), cash)
+    spotted.rules = rules
+    a = ss.build_layout(plain, _edge([cash, gpp]), metric="CalPts", cash_line=143.9, gpp_target=190.0)
+    b = ss.build_layout(spotted, _edge([cash, gpp]), metric="CalPts", cash_line=143.9, gpp_target=190.0)
+    assert not a.open_rows and b.open_rows and b.open_title_row < b.bar_rows[0]
+    for row in [b.open_title_row, *b.open_rows]:  # never in the typed lock or Name columns
+        cells = b.rows[row - 1]
+        assert cells[ss.LOCK_INDEX] == "" and cells[ss.NAME_INDEX] == ""
+    labels = [b.rows[r - 1][0] for r in b.open_rows]
+    assert labels[0] == "Core" and len(labels) == 2  # one open spot (where the FLEX rule seats it)
+    flex = b.rows[b.open_rows[1] - 1][ss.TITLE_INDEX]
+    assert "ALT WR" in flex and "+$300 freed" in flex and "%" not in flex.replace("own -", "")
+    sa, sb = ss.parse_state(a.rows), ss.parse_state(b.rows)
+    assert sb.rules == sa.rules and sb.layout_problem is None is sa.layout_problem
+    assert [(x.number, x.kind, x.names, x.locked) for x in sb.builds] == [
+        (x.number, x.kind, x.names, x.locked) for x in sa.builds
+    ]
+    assert ss.parse_builds(b.rows) == ss.parse_builds(a.rows)
+    status = b.rows[1][0]
+    assert status.endswith("Default cash lineup: lean: cash builds have cashed 14 of 25")
+
+
+def test_no_cash_percentage_is_written_anywhere_on_the_tab():
+    cash = _build(1, "cash", "Cash build 1")
+    report = _with_core(_report(cash), cash)
+    layout = ss.build_layout(report, _edge([cash]), metric="CalPts", cash_line=143.9, gpp_target=190.0)
+    text = " ".join(str(c) for row in layout.rows for c in row)
+    assert "Cash %" not in text and "51%" not in text and 0.512 not in [c for row in layout.rows for c in row]
+    assert "Cash 51%" not in ss.build_summary(cash) and "Top 1%" not in ss.build_summary(cash)

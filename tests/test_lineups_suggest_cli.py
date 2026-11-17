@@ -114,8 +114,8 @@ def test_it_prints_how_long_every_phase_took_in_the_order_they_ran(cfg, edge, ca
         "set up simulator",
         "candidates",
         "search",
+        "choose",  # the cash builds are chosen by projection first, then only they are simulated
         "simulate",
-        "choose",
         "write tab",
         "format tab",
     ]
@@ -233,8 +233,9 @@ def test_rounds_are_kept_and_iterate_and_round_restore_work_end_to_end(
 
 
 def test_the_saved_round_keeps_the_calibrated_cash_percent_as_p_cash_shown(cfg, edge, capsys, monkeypatch):
-    """Plan D item 9: with `[sim.lines] calibrated_cash_offset` on, the round file keeps `p_cash` (today's
-    line, what ranked the builds) and `p_cash_shown` (the calibrated number the tab and Week page show)."""
+    """Plan D item 9, Phase A: with `[sim.lines] calibrated_cash_offset` on, the round file keeps the cash
+    build's `p_cash_shown` (against the measured line) for the calibration scorecard; it is never printed: the
+    band word reads it ("under" below 45%)."""
     import dataclasses
 
     lines = SimpleNamespace(display_field=object(), status="", note="", cash_basis="")
@@ -249,7 +250,10 @@ def test_the_saved_round_keeps_the_calibrated_cash_percent_as_p_cash_shown(cfg, 
         lambda builds, specs, field: [dataclasses.replace(b, p_cash=0.42) for b in builds],
     )
     monkeypatch.setattr(cli, "write_suggested", lambda *a, **k: "Suggested: ok")
-    run(cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys)
+    out = run(cfg, edge, dict.fromkeys(edge["Name"], "Both"), capsys)
     (rnd,) = suggest_state.load_state(6).rounds
-    assert all(b.metrics["p_cash_shown"] == 0.42 for b in rnd.builds)
+    assert all(b.metrics["p_cash_shown"] == 0.42 for b in rnd.builds if b.kind == "cash")
+    assert all("p_cash_shown" not in b.metrics for b in rnd.builds if b.kind == "gpp")
     assert all(b.metrics.get("p_cash") != 0.42 for b in rnd.builds if b.kind == "cash")
+    assert rnd.cash_core["default"]["band"]["word"] == "under"
+    assert "42%" not in out and "Default cash lineup:" in out

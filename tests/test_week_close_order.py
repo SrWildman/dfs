@@ -16,12 +16,26 @@ def test_the_dk_files_are_kept_before_model_check_is_scored_and_the_contests_ste
     monkeypatch.setattr(cli, "_contest_plan_after_close", lambda *a, **k: calls.append("plan"))
     monkeypatch.setattr(cli, "_entered_record_warning", lambda *a, **k: calls.append("record?"))
     monkeypatch.setattr(cli, "_cash_postmortem_after_close", lambda *a, **k: calls.append("postmortem"))
+    monkeypatch.setattr(cli, "_du_line_after_close", lambda *a, **k: calls.append("du-line"))
     monkeypatch.setattr(cli, "_plan_k_after_close", lambda *a, **k: calls.append("plan-k"))
     monkeypatch.setattr(cli, "_closed_week", lambda cfg, week: 8)
     cli.week_close(csv=None, week=None)
     # the plan line reads the log the contests step just updated; the bankroll curve and the copies
-    # calibration read what the close wrote
-    assert calls == ["bankroll", "keep", "score", "contests", "plan", "record?", "postmortem", "plan-k"]
+    # calibration read what the close wrote; the cash band's line is refitted before the review (Phase A)
+    assert calls == [
+        "bankroll", "keep", "score", "contests", "plan", "record?", "postmortem", "du-line", "plan-k"
+    ]  # fmt: skip
+
+
+def test_the_double_up_line_refit_never_fails_the_close(monkeypatch):
+    from dfs.sim import du_line_retro
+
+    def boom(*a, **k):
+        raise FileNotFoundError("no standings")
+
+    monkeypatch.setattr(du_line_retro, "refresh_summary", boom)
+    cli._du_line_after_close(9)  # prints a warning, does not raise
+    cli._du_line_after_close(None)  # no closed week: nothing to refit
 
 
 def test_the_plan_check_never_fails_the_close():

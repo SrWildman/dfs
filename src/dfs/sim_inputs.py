@@ -155,8 +155,8 @@ class SimLines:
             else ""
         )
         return (
-            f"lines move with the slate: Cash % = field average +{field.cash_offset:g}{calibrated}, "
-            f"Top 1% = field average +{field.top_offset:g}"
+            f"lines move with the slate: the cash band's line = field average +{field.cash_offset:g}"
+            f"{calibrated}, Top 1% = field average +{field.top_offset:g}"
         )
 
 

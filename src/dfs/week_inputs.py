@@ -421,6 +421,7 @@ class WeekInputs:
     scored_weeks: tuple[int, int] | None = None  # the first and last week it was scored over
     pool: dict[str, str] = field(default_factory=dict)
     suggest: dict | None = None  # the latest round of data/suggest_state/<week>.json
+    cash_core: dict | None = None  # the Default cash lineup, its core and open spots (`cash_core.payload`)
     stacks: dict | None = None
     stacks_retro: dict | None = None
     late_swap: dict | None = None
@@ -477,6 +478,7 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         scored_weeks=scored_weeks,
         pool=load_pool(d, season, week),
         suggest=latest_round(d, week),
+        cash_core=load_input("cash_core", season, week, d),
         stacks=load_input("stacks", season, week, d),
         stacks_retro=read_json(d / "model_cache" / "stacks_retro.json"),
         late_swap=read_json(d / "cockpit" / "late_swap.json"),

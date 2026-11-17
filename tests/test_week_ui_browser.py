@@ -481,10 +481,16 @@ def test_a_slow_refresh_never_puts_an_old_pool_value_back_and_an_add_merges_with
     # GPP is read back; the refresh that write asked for is held (its render read the sheet as GPP)
     until(page, f"!window.dfsPool.saving({pid!r}) && window.dfsPool.get({pid!r}) === 'GPP'")
     until(page, "window.dfsLive.refreshing()")
-    page.evaluate(f"window.dfsPool.request([{{id: {pid!r}, add: 'Cash'}}])")
-    assert page.evaluate(f"window.dfsPool.saving({pid!r})")  # shown as saving until it lands
     shown = f"document.querySelector('#board .seg[data-id=\"{pid}\"] button.on').dataset.v"
-    assert page.evaluate(shown) == "Both"  # resolved against the read-back: GPP + Cash
+    # The click and what it shows at once are read in ONE evaluate: the write is a local request that can
+    # land between two round trips to the browser, so "saving" read in a second call was the flake (it failed
+    # every time with a 300 ms pause between the two calls; the page was right, the test was not).
+    saving, at_click = page.evaluate(
+        f"(() => {{ window.dfsPool.request([{{id: {pid!r}, add: 'Cash'}}]);"
+        f" return [window.dfsPool.saving({pid!r}), {shown}]; }})()"
+    )
+    assert saving  # shown as saving until it lands
+    assert at_click == "Both"  # resolved against the read-back: GPP + Cash
     until(page, f"!window.dfsPool.saving({pid!r}) && window.dfsPool.get({pid!r}) === 'Both'")
     assert served.pool(name) == "Both"
     assert page.evaluate("window.dfsLive.refreshing()")  # the GPP render is still held

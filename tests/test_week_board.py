@@ -201,3 +201,25 @@ def test_the_brief_on_an_empty_week_says_sync():
     object.__setattr__(inp, "edge", None)
     out = week_board.brief(inp, None, None)
     assert len(out) == 1 and "sync" in out[0].text
+
+
+# -- blueprint Phase A: the board's Cash core is the build's real core once there is one --------------------
+
+
+def test_the_cash_core_role_is_the_builds_real_core_once_suggest_has_run(tmp_path):
+    before = week_board.board(inputs(tmp_path, slate_rows()))
+    assert not before.cash_real
+    core = {
+        "core": [{"name": "Rb Warn"}, {"name": "Gone", "faded": True}],
+        "open": [],
+        "default": {"names": ["x"]},
+    }
+    after = week_board.board(replace(inputs(tmp_path), cash_core=core))
+    cash = {r.name for r in after.rows() if week_board.CASH in r.roles or week_board.CHALK_CORE in r.roles}
+    assert after.cash_real and "Rb Warn" in cash and "Gone" not in cash
+    assert all(r.cash_real for r in after.rows() if not r.fade)
+    from dfs import week_top
+
+    html = week_top.board_html(after, {}, False, {})
+    assert "before the first build" not in html
+    assert "before the first build" in week_top.board_html(before, {}, False, {})

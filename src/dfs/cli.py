@@ -3337,6 +3337,13 @@ class SuggestRank(StrEnum):
     share = "share"
 
 
+class SuggestOnly(StrEnum):
+    """`dfs lineups suggest --iterate --only`: the kind of build a rerun searches (the other stays as is)."""
+
+    cash = "cash"
+    gpp = "gpp"
+
+
 assert tuple(r.value for r in SuggestRank) == RANKS  # one list of ranks, spelled once in the suggest module
 
 
@@ -4025,14 +4032,23 @@ def lineups_suggest(
         help="Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a "
         "new round (the state is kept in data/suggest_state/<week>.json).",
     ),
+    only: SuggestOnly | None = typer.Option(
+        None,
+        "--only",
+        help="With --iterate: rerun only this kind of build. `cash` searches the Default cash lineup again "
+        "around the rules box (what the Week page's open-spot pick runs) and leaves every GPP build as is; "
+        "`gpp` leaves the cash builds as they are.",
+    ),
 ) -> None:
     """Build complete lineups from your Player Pool and write them to the
     Suggested tab.
 
-    Cash builds (default 3) have the best chance of beating the double-up
-    cash line, which moves with the slate (the field's average score plus a
-    small margin, worked out from projected ownership; before ownership
-    publishes, or with `--fixed-lines`, your typed Cash Line median). GPP
+    The cash build (default 1) is the Default cash lineup: the top lineup by
+    projection, with its core (players in 70%+ of the lineups within 1.5
+    points of it) and its open spots (each with up to two single swaps, shown
+    as differences). It carries a band, never a percentage ("lean: cash
+    builds have cashed 14 of 25"): the band's line is the double-up line
+    measured on your own contests (refitted at every `dfs week close`). GPP
     builds each hold a stack (a QB and one to three teammates of any
     position, with or without a bring-back, in several shapes: also a stack
     with a RB, a game stack, a stack with a RB and his DST and a contrarian
@@ -4065,6 +4081,9 @@ def lineups_suggest(
     Copy builds to Lineups (type 1,4,6 or all). Reads the last sync's data; run `dfs sync` (or
     `dfs sync --live`) first for the freshest picture."""
     cfg = _load_config_or_exit()
+    if only is not None and not iterate:
+        console.print("[red]--only goes with --iterate (a fresh run builds both kinds).[/red]")
+        raise typer.Exit(code=2)
     with build_exact.use(_builds_solver(cfg)):  # `[builds] solver`: every search of this run
         _run_suggest(
             cfg,
@@ -4079,6 +4098,7 @@ def lineups_suggest(
             rank=rank.value,
             iterate=iterate,
             restore_round=round_,
+            only=only.value if only is not None else None,
         )
 
 
@@ -4110,6 +4130,7 @@ def _run_suggest(
     rank: str = DEFAULT_RANK,
     iterate: bool = False,
     restore_round: int | None = None,
+    only: str | None = None,
 ) -> None:
     """Everything `dfs lineups suggest` does. `now` is a parameter so a run can be replayed at a chosen point
     in the slate; the command passes the real clock. A fresh run, `iterate` (rerun around the tab's
@@ -4247,6 +4268,7 @@ def _run_suggest(
             rank=rank,
             bring_back_gain=gain,
             freeze=restored is not None,
+            only=only,
         )
         report, records = iterated.report, iterated.records
         report.notes.extend(
@@ -4268,15 +4290,17 @@ def _run_suggest(
     report.round = record.round
     report.history = suggest_state.history_lines(state)
     if settings.lines is not None and settings.lines.display_field is not None:
-        # `[sim.lines] calibrated_cash_offset`: the builds were chosen and saved on today's line; only the
-        # Cash % shown below and on the tab is measured against the calibrated one
-        report.builds = with_shown_cash(report.builds, specs, settings.lines.display_field)
-        # the saved round keeps both: `p_cash` (today's line, what ranked it) and `p_cash_shown` (what the tab
-        # and the Week page show)
-        shown = {b.number: b.p_cash for b in report.builds}
+        # `[sim.lines] calibrated_cash_offset`: the cash builds measured against the double-up line measured
+        # on his own contests. Never shown as a number: the Default's band word reads it, and the saved round
+        # keeps it as `p_cash_shown` for the calibration scorecard (`numbers.py`, `cash_shown.csv`).
+        cash_only = [b for b in report.builds if b.kind == "cash"]
+        shown = {b.number: b.p_cash for b in with_shown_cash(cash_only, specs, settings.lines.display_field)}
         for rec in record.builds:
             if shown.get(rec.number) is not None:
                 rec.metrics["p_cash_shown"] = round(float(shown[rec.number]), 4)
+    else:
+        shown = {}
+    core_payload = _cash_core_payload(report, record, edge, shown, tab, now=now)
     how = {"suggest": "fresh run", "iterate": "rerun", "restore": f"round {restored} restored"}[command]
     console.print(
         f"Round {record.round} ({how}). Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "
@@ -4295,6 +4319,17 @@ def _run_suggest(
             console.print("  " + line, markup=False, highlight=False, soft_wrap=True)
         if build.note:
             console.print(f"  -> {build.note}", markup=False, highlight=False, soft_wrap=True)
+        console.print()
+    if report.cash_core is not None:
+        from dfs import cash_core as cc
+
+        band = cc.band(
+            (core_payload or {}).get("default", {}).get("band", {}).get("shown"),
+            _cash_record(),
+            *_du_line_offset(),
+        )
+        for line in cc.summary_lines(report.cash_core, band):
+            console.print(line, markup=False, highlight=False, soft_wrap=True)
         console.print()
     for note in report.notes:
         console.print(f"[yellow]{note}[/yellow]")
@@ -4327,7 +4362,80 @@ def _run_suggest(
         raise typer.Exit(code=1) from e
     path = suggest_state.save_state(state)  # after the tab: the file mirrors what the tab shows
     console.print(f"[green]OK[/green] round {record.round} saved to {path}")
+    if core_payload is not None:
+        from dfs import week_inputs
+
+        week_inputs.save_input("cash_core", core_payload, season=nfl_calendar.current_season(), week=week)
     _print_phases(phases)
+
+
+def _cash_record() -> tuple[int, int] | None:
+    """(cashed, scored) of every cash build so far (`data/contests/cash_shown.csv`); None without one."""
+    import csv
+
+    from dfs import cash_core as cc
+    from dfs.paths import CONTESTS_DIR
+
+    path = CONTESTS_DIR / "cash_shown.csv"
+    try:
+        with path.open(newline="", encoding="utf-8") as f:
+            return cc.record_of(list(csv.DictReader(f)))
+    except OSError:
+        return None
+
+
+def _du_line_offset() -> tuple[float | None, tuple[int, ...]]:
+    """The measured double-up offset and the weeks it was fitted on (`du_line.json`), or (None, ())."""
+    from dfs.sim import du_line
+
+    try:
+        cal = du_line.load_calibration()
+    except Exception:  # noqa: BLE001 - the band says nothing about the line rather than fail the run
+        return None, ()
+    return (cal.offset, tuple(cal.weeks)) if cal is not None else (None, ())
+
+
+def _cash_core_payload(report, record, edge, shown: dict, tab, *, now: datetime) -> dict | None:  # noqa: ANN001
+    """The Default cash lineup's week input (`cash_core.payload`), kept on the round too, and its band on the
+    report (the Suggested tab's status line). None when the run built no cash lineup."""
+    from dfs import cash_core as cc
+    from dfs import flex_order
+    from dfs.kickoff import parse_kickoff
+
+    core = report.cash_core
+    if core is None:
+        return None
+    default = {p.name for p in core.default}
+    number = next(
+        (b.number for b in report.builds if b.kind == "cash" and {p.name for p in b.players} == default), None
+    )
+    offset, weeks = _du_line_offset()
+    band = cc.band(shown.get(number) if number is not None else None, _cash_record(), offset, weeks)
+    report.cash_band = band.text
+    rows = edge.to_dict("records")
+    details = cc.details_from_rows(rows)
+    names = list(dict.fromkeys(str(n) for n in edge["Name"]))
+    teams = set(edge["Team"].dropna().astype(str)) if "Team" in edge.columns else set()
+    rules = suggest_state.parse_rules(tab.rules, names, teams)
+    starts = {str(r.get("Name")): parse_kickoff(r.get("GameStart")) for r in rows}
+    plan = flex_order.plan_flex(
+        [
+            flex_order.Seat(slot, p.name, p.position, starts.get(p.name))
+            for slot, p in zip(ROSTER_SLOTS, core.default, strict=True)
+        ],
+        now,
+    )
+    payload = cc.payload(
+        core,
+        details,
+        band,
+        round=record.round,
+        at=record.at,
+        faded=sorted(n for n in rules.never_for("cash") if n not in default),
+        flex_order="OK" if plan.status in ("ok", "keep", "none") else plan.status,
+    )
+    record.cash_core = payload
+    return payload
 
 
 def _print_phases(phases: dict[str, tuple[float, int]]) -> None:
@@ -4942,9 +5050,30 @@ def week_close(
     _contest_plan_after_close(cfg, closed)
     _entered_record_warning(closed)
     _cash_postmortem_after_close(closed)
+    _du_line_after_close(closed)  # before the review: the band's line, measured on the new double-up too
     _plan_k_after_close(cfg, closed)
     if research:
         _research_after_close(cfg, week)
+
+
+def _du_line_after_close(closed: int | None) -> None:
+    """Refit the double-up line the cash band is shown against (`data/model_cache/du_line.json`) on every
+    week with standings, the one just closed included (blueprint Phase A; `du_line_retro.refresh_summary`:
+    only weeks not simulated before are simulated, so a close adds about a minute). NEVER fails the close."""
+    if closed is None:
+        return
+    try:
+        from dfs.nfl_calendar import current_season
+        from dfs.sim import du_line_retro
+
+        summary = du_line_retro.refresh_summary(current_season(), closed)
+        head = (summary.get("headline") or [""])[0]
+        console.print(f"\n[green]OK[/green] double-up line refitted: {escape(head)}", highlight=False)
+    except Exception as e:  # noqa: BLE001 - the close never fails over the band's line
+        console.print(
+            f"[yellow]The double-up line was not refitted ({escape(str(e))}); `dfs research refresh --only "
+            "du_line` refits it.[/yellow]"
+        )
 
 
 def _plan_k_after_close(cfg: Config, closed: int | None) -> None:

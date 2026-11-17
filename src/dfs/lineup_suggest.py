@@ -11,12 +11,14 @@ get wrong and the least worth hand-picking), nobody listed OUT or IR, nobody who
 rules are late swap's: the salary cap, the roster slots (FLEX takes an RB, WR or TE), no DST against his own
 QB and at most one RB per game.
 
-**Cash builds** (default 3). The best `CASH_TOP_K` lineups by projection (the branch-and-bound of
-`late_swap_search`, `top_lineups`) are all simulated, and the builds are the ones with the highest `Cash %`
-(the simulator's chance of beating the double-up cash line, which moves with the slate: the field's average
-score plus a fixed margin; `dfs.sim.field`), each differing from the builds before it by at least
-`MIN_DIFFERENCE` players. Against a FIXED line above a lineup's median, maximising P(score > line) would
-reward variance, the opposite of a cash build; measuring against the field is what stops that.
+**Cash builds** (default 1: the Default; blueprint Phase A). The best `CASH_TOP_K` lineups by projection (the
+branch-and-bound of `late_swap_search`, `top_lineups`) are searched, and the builds are the best by projection
+(`cash_key`: then the cheaper lineup, then the names), each differing from the builds before it by at least
+`MIN_DIFFERENCE` players. Only the chosen builds are simulated. `cash_core.py` reads the same top lineups for
+the Default's core (players in 70%+ of the lineups within 1.5 points) and its open spots. No Cash % ranks or
+is
+shown per build: twenty cash builds a week differ by half a point in projection and by 18 in results, and no
+pre-lock number picked between them (blueprint finding 6).
 
 **GPP builds** (every QB stack, ideally `BUILDS_PER_QB` = 2 each; `--gpp N` asks for the N best
 instead; any pool player may be used, but never a lineup of only Cash-marked ones). Every candidate holds
@@ -58,6 +60,7 @@ from datetime import datetime
 
 import pandas as pd
 
+from dfs import cash_core as cash_core_mod
 from dfs import chalk_watch
 from dfs import lineup_shapes as shapes_mod
 from dfs import search_clock as clock
@@ -77,12 +80,12 @@ from dfs.sim.field import FieldModel, build_field, has_ownership
 from dfs.sim.simulate import PlayerSpec
 from dfs.sim_inputs import N_SIMS, SEED, lineup_from_names, ownership_by_name
 
-DEFAULT_CASH_BUILDS = 3
+DEFAULT_CASH_BUILDS = 1  # one Default cash lineup, its core and open spots (blueprint Phase A)
 SECOND_BUILD_MIN_DIFFERENCE = 2  # a QB's second build need only differ from the others by this many players
 BUILDS_PER_QB = 2  # GPP builds: every QB with a stack gets one build, and ideally this many
 MIN_DIFFERENCE = 3  # each build differs from every earlier one by at least this many players
 MAX_EXPOSURE = 0.6  # no player in more than this share of the GPP builds
-CASH_TOP_K = 300  # how many of the best cash lineups by projection are simulated
+CASH_TOP_K = 300  # the best cash lineups by projection the cash search returns (`cash_core` reads them)
 PER_QB = 80  # stacked lineups kept per quarterback while building the GPP candidates
 TIME_LIMIT_SECONDS = 120.0  # the whole search, cash and GPP together (a real slate needs 53-152 s)
 CASH_SHARE_OF_TIME = 0.4  # the cash search may use this share of it; GPP gets the rest
@@ -152,6 +155,9 @@ class SuggestReport:
     complete: bool = True  # False when the time limit cut a search short
     phases: dict[str, float] = field(default_factory=dict)  # phase -> seconds, in the order they ran
     rank: str = DEFAULT_RANK  # what ordered the GPP candidates ("top1" or "share")
+    # The Default cash lineup, its core and its open spots (`cash_core.py`; None without a cash search)
+    cash_core: cash_core_mod.CashCore | None = None
+    cash_band: str = ""  # the Default's band ("lean: cash builds have cashed 14 of 25"); never a percentage
     # The iterate state shown on the tab (`sheet_suggested`): which round this is, the typed rules box (label
     # -> text, carried from the tab) and the one-line history of every round.
     round: int = 0
@@ -441,6 +447,21 @@ def score(
     ]
 
 
+def unscored(lineup: Sequence[SwapPlayer], kickoff: dict[str, datetime | None]) -> Scored:
+    """A lineup seated, with its projection and salary and no simulated numbers (the cash choice reads only
+    the projection; the chosen builds are simulated afterwards)."""
+    players = seat(lineup, kickoff)
+    return Scored(
+        players=players,
+        projection=sum(p.value for p in players),
+        salary=sum(p.salary for p in players),
+        p_cash=float("nan"),
+        p_gpp=float("nan"),
+        typical=float("nan"),
+        big_night=float("nan"),
+    )
+
+
 def different_enough(a: Sequence[SwapPlayer], b: Sequence[SwapPlayer], minimum: int = MIN_DIFFERENCE) -> bool:
     """True when the two lineups differ by at least `minimum` players."""
     return len({p.name for p in a} - {p.name for p in b}) >= minimum
@@ -459,9 +480,10 @@ def lineup_key(scored: Scored) -> tuple[str, ...]:
 
 
 def cash_key(s: Scored):
-    """Best first: the chance of beating the cash line, then projection, the cheaper lineup, then names."""
+    """Best first: the projection, the cheaper lineup, then names (blueprint Phase A: no number the tool shows
+    ranks cash builds better than the projection, so the Cash % no longer orders them; `cash_core.default_key`
+    is the same order)."""
     return (
-        -round(s.p_cash, PROB_DECIMALS),
         -round(s.projection, VALUE_DECIMALS),
         s.salary,
         lineup_key(s),
@@ -726,6 +748,7 @@ def suggest_builds(
     cash_dup_model: dups.DupModel = dups.DUP_MODEL_CASH,
     cash_fixed: Sequence[str] = (),
     gpp_dup_shares: dict[str, float] | None = None,
+    cash_never: Sequence[str] = (),
 ) -> SuggestReport:
     """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both).
     `field` (from `sim_inputs.resolve_lines`) scores against lines that move with the slate; without it the
@@ -736,7 +759,8 @@ def suggest_builds(
     GPP shapes to search (`lineup_shapes.SHAPES`); `rank` what orders the GPP candidates: "top1" (the
     default) the Top 1% chance alone, "share" that chance divided by 1 + the duplicates expected.
     `cash_fixed` names players every cash build holds (the backtest's `calls` flag locks the CORE calls;
-    a name not in the cash pool is ignored). `gpp_dup_shares` (default none: the field's own shares) is the
+    a name not in the cash pool is ignored); `cash_never` names players left out of the cash pool.
+    `gpp_dup_shares` (default none: the field's own shares) is the
     ownership the GPP builds' copies are read from, with `gpp_dup_model` (a backtest hook can set
     both)."""
     gpp_order = rank_key(rank)
@@ -761,6 +785,8 @@ def suggest_builds(
 
     t = time.monotonic()
     cash_pool = pool_for(edge, tags, CASH_TAGS, now=now, metric=metric, any_dst=True) if cash_builds else []
+    if cash_never:
+        cash_pool = [p for p in cash_pool if p.name not in set(cash_never)]
     gpp_pool = pool_for(edge, tags, GPP_TAGS, now=now, metric=metric, any_dst=True) if gpp_builds != 0 else []
     report.candidates = {"cash": len(cash_pool), "gpp": len(gpp_pool)}
     timed("candidates", t)
@@ -770,20 +796,29 @@ def suggest_builds(
         fixed = [p for p in cash_pool if p.name in set(cash_fixed)]
         lineups, done = cash_lineups(cash_pool, cap=cap, deadline=cash_deadline, fixed=fixed)
         report.complete = report.complete and done
-        t = timed("search", t)
-        scored = score(
-            lineups,
-            specs,
-            kickoff,
-            cash_line=cash_line,
-            gpp_target=gpp_target,
-            n_sims=n_sims,
-            seed=seed,
-            field=field,
+        report.cash_core = cash_core_mod.cash_core(
+            lineups, cash_pool, cap=cap, kickoff=kickoff, k=CASH_TOP_K, complete=done
         )
-        t = timed("simulate", t)
-        picks = choose(scored, cash_builds, key=cash_key)
-        timed("choose", t)
+        t = timed("search", t)
+        # Chosen by projection (`cash_key`): only the chosen ones are simulated (the Default's band, and what
+        # the Total row and the saved round keep), never the whole top 300.
+        picks = choose([unscored(lu, kickoff) for lu in lineups], cash_builds, key=cash_key)
+        t = timed("choose", t)
+        rated = {
+            lineup_key(s): s
+            for s in score(
+                [list(p.players) for p in picks],
+                specs,
+                kickoff,
+                cash_line=cash_line,
+                gpp_target=gpp_target,
+                n_sims=n_sims,
+                seed=seed,
+                field=field,
+            )
+        }
+        picks = [rated.get(lineup_key(p), p) for p in picks]
+        timed("simulate", t)
         # The Week 4 lesson, as a warning and never a filter: a double-up build many entries share.
         cash_shares = ownership_shares(specs, edge, field, "cash")
         picks = annotate(

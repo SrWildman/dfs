@@ -606,13 +606,20 @@ document.addEventListener('click', async (e) => {
     if (opt.dataset.opt === 'pivot') {
       const ul = document.querySelector('ul.pivots[data-key="' + CSS.escape(opt.dataset.key) + '"]'); if (ul) ul.hidden = !ul.hidden; return;
     }
-    await write('/api/decide', {key: opt.dataset.key, option: opt.dataset.opt, rules_was: rulesWas()}); return;
+    const r = await write('/api/decide', {key: opt.dataset.key, option: opt.dataset.opt, rules_was: rulesWas()});
+    rerunCash(r, opt.dataset.key); return;
   }
   const pv = e.target.closest('.dec button.pivot');
   if (pv) { await write('/api/decide', {key: pv.dataset.key, option: 'pivot', pivot: pv.dataset.pivot, pool_was: pv.dataset.was || '', rules_was: rulesWas()}); return; }
   const un = e.target.closest('.dec button.undo');
-  if (un) { await write('/api/decide', {key: un.dataset.key, option: 'undo', rules_was: rulesWas()}); }
+  if (un) { const r = await write('/api/decide', {key: un.dataset.key, option: 'undo', rules_was: rulesWas()}); rerunCash(r, un.dataset.key); }
 });
+/* blueprint Phase A: a core Play / Fade or an open-spot pick (and their undo) reruns only the cash builds
+   (`dfs lineups suggest --iterate --only cash`), so the Default follows the rules box */
+const CASH_RERUN = {command: 'dfs lineups suggest', values: {iterate: true, only: 'cash'}};
+function rerunCash(r, key) {
+  if (r && /^(core|spot):/.test(key || '')) startJob(CASH_RERUN.command, CASH_RERUN.values);
+}
 
 /* ---------- the contest check form, the budget, the drop zone ---------- */
 const checkForm = $('#check-form');

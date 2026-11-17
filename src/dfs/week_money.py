@@ -54,7 +54,8 @@ TRUST: dict[str, tuple[str, str]] = {
     "entry_plan": (DATA, "Checks on what you entered against your own plan: facts, not predictions."),
     "entry_hint": (
         UNTESTED,
-        "The same rule `dfs entries fill` uses for its grey Suggested hint (best Cash % / best Top 1%). No "
+        "The same rule `dfs entries fill` uses for its grey Suggested hint (the Default, the top cash build "
+        "by projection / best Top 1%). No "
         "contest-by-contest ranking has cleared the contest retro's bar.",
     ),
     "practice": (DATA, "nflverse's practice reports as our syncs saw them: a feed."),
@@ -827,7 +828,8 @@ def entry_plan_section(inp: WeekInputs) -> Section:
     body.append(
         f"<p>{chip('entry_hint')} <b>Suggested (hint)</b> is the same rule <code>dfs entries fill</code> "
         "greys in: the cash "
-        "build with the best Cash % for a cash contest, the GPP build with the best Top 1% for a GPP. No "
+        "build with the top projection (the Default) for a cash contest, the GPP build with the best Top 1% "
+        "for a GPP. No "
         "contest-by-contest ranking has cleared the contest retro's bar, so it is a hint only. You upload to "
         "DraftKings yourself.</p>"
     )
