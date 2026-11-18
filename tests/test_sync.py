@@ -266,7 +266,6 @@ def _sync_cli(monkeypatch, tmp_path, results):
     monkeypatch.setattr(
         cli, "run_sync", lambda *a, **k: [SourceResult(*r[:4], pending=r[4]) for r in results]
     )
-    monkeypatch.setattr(cli, "_edge_width_now", lambda cfg: None)
     return CliRunner().invoke(
         cli.app, ["sync", "--only", "tffb_gps", "--no-upload", "--week", "9", "--season", "2026"]
     )

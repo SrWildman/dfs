@@ -3,7 +3,7 @@ two sheetless sources that save them."""
 
 import pandas as pd
 import pytest
-from test_player_card import _pbp, _stat
+from test_player_log import _pbp, _stat
 
 from dfs import usage_weeks
 from dfs.sources import SOURCES

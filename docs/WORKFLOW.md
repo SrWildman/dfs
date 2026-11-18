@@ -55,7 +55,7 @@ synced-data cache (so a source that fails on the first sync reads as
 no-data-yet rather than a previous week's now-mismatched numbers), and
 runs a full `dfs sync`. It then prints which saved odds snapshot the week's line movement is measured against, e.g. "Opening lines: Tue 9:30 am ET snapshot (after the previous week's last game)"
 (or says it is using the current lines when none is older). If the new sheet has a Cockpit tab (a copied template does), the
-sync is followed by a rebuild of it from the data just synced, so last week's render is gone at once; it never fails the week. A Player tab's hidden raw tabs are rewritten the same way. The same goes for a Stacks tab.
+sync is followed by a rebuild of it from the data just synced, so last week's render is gone at once; it never fails the week. The same goes for a Stacks tab.
 
 **The opening lines.** Movement (`ImpliedMove`, `TotMove`, `SpdMove`, the Movement tab) is measured against the week's *opening* lines: the earliest saved `nfl_odds` snapshot that shows the new
 week's slate, not whenever `dfs week new` happened to run (`store.opening_snapshot`). The odds source only ever shows the current slate, so the opening is on record only if the lines were saved
@@ -95,11 +95,8 @@ Every sync also rewrites the **Edge Finder** tab (cash core and GPP upside per p
 the unproven context signals; your open/closed sections survive the rewrite). The final `dfs sync --live` after inactives (about 90 minutes before kickoff) is the one that
 matters for the injury list. `CalPts` is **not** the default projection: it is tracked in Model Check.
 
-The **Player** tab is the one-page look at a single player: pick a name in B1 and it shows his projections side by side, ownership, last five games of usage, matchup, props, the signals firing on him with
-Model Check's record for each, and how many of your lineups he is in. `dfs sync` keeps its data fresh (on a sheet that has the tab: `dfs setup player-card` creates it, template first).
-
-The **Compare** tab is the same card for up to four players side by side: pick names in B1:E1 and the best value in each row is green (lowest for Bust% and OppPosRank; salary and ownership are never shaded, the better side depends on cash vs GPP). Compare within a position.
-It is formulas over EdgeRaw (`dfs setup compare` creates it, template first); a sync that widens EdgeRaw rebuilds it.
+One player in full is on the Week page: click any name for his drawer (projections side by side, ownership, his last five games game by game, matchup, this week's prop lines, the signals firing on him with
+Model Check's record), and **+ Compare** puts up to four side by side, the best value in each row green. (The sheet's Player and Compare tabs were removed in November.)
 
 Check Board first each week -- it's a landing view, five collapsible
 sections: Slate shape (games ranked by total, with Fav/Spread/Pace/wind/shootout
@@ -529,7 +526,7 @@ split; filled by a full `dfs sync`), **Injuries** (every listed player per team,
 and FADE with the backtest and live records kept apart) and **Everything** (every block). Each view has its own
 `#name` (bookmark it, the back button works) and the page reopens on the last one you used that week. The search box
 (press `/`) finds any priced player on any view; **+ Compare** (in the search, the drawer, or any name's pool chip) puts
-up to four players side by side with the Compare tab's rows, usage trends and ownership. **Team news** chips follow
+up to four players side by side (projections, ownership, usage, opportunity per dollar, matchup), usage trends and ownership. **Team news** chips follow
 the names on the board, the decisions, the overview, the plays calls and the injury report: "Backup QB: Lock" (his QB is
 out), "Pickens out (WR2)" (a teammate's targets are free), "Lead target 36%" (he is the main guy now); hover for the
 full line, and the brief says it for the chalk.

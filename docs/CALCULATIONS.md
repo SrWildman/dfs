@@ -2293,7 +2293,7 @@ less (a player the field owns at 15%+ that he has none of is included at 0%).
 
 Change = this week's EdgeRaw `Salary` - last week's (the main-slate DraftKings file `contests.week_frames` picks for
 last week), matched on normalised name and team. **Flag**: a drop of $300+ and a steady role: over his last three
-games in the Player card's log, `Snap%` (else targets) each within 10% of their own mean. A drop without one is
+games in the game log (`data/current/player_log.csv`), `Snap%` (else targets) each within 10% of their own mean. A drop without one is
 listed apart ("moved", or "no game log" for a player with none, e.g. a DST).
 
 ## Opportunity per dollar (`opportunity.py`, 2026-10-21; shadow)
@@ -2310,9 +2310,9 @@ Sam's question: "targets per route run, weighted opportunities, targets per doll
 | `Tgt/$` | targets per game / (salary / 1000) | RB WR TE | 3 games |
 | `HVT/$` | high-value touches (targets + carries inside the opponent's 10, the `HVT/G` definition) per game / (salary / 1000) | RB | 3 games |
 | `PriceGap` | within a position's rosterable pool (players with an `xFP/$`, at least 8), fit `xFP Szn` on salary in $1k with a straight line; the gap is the player's residual over the residual SD (ddof 2). +1.0 = one SD more expected scoring than a typical player at his price | QB RB WR TE | 3 games; 8 fitted players |
-| `Snap% L5`, `Tgt L5`, `Car L5`, `DK L5` | mean over his last five games played of the Player card's game log (`player_card.usage_log`): offensive snap share, targets, carries, real DK points | QB RB WR TE (a QB's targets are blank) | 1 game |
+| `Snap% L5`, `Tgt L5`, `Car L5`, `DK L5` | mean over his last five games played of the game log (`sources.player_log.usage_log`, `data/current/player_log.csv`): offensive snap share, targets, carries, real DK points | QB RB WR TE (a QB's targets are blank) | 1 game |
 
-`SleeperPts`, `FantasyProsPts` and `Kickoff` (ET text of `GameStart`) are the other per-player fields that used to live only on the Player card's hidden `PlayerCardRaw`; they are EdgeRaw columns now.
+`SleeperPts`, `FantasyProsPts` and `Kickoff` (ET text of `GameStart`) are the other per-player fields that used to live only on the Player card's hidden `PlayerCardRaw` (both removed in batch F9); they are EdgeRaw columns.
 
 **Scoring (Model Check, "OPPORTUNITY PER DOLLAR").** `results_signals.attach_opportunity` rebuilds every feature for each scored week from games before that week only (`tests/test_opportunity.py` rewrites the week's own and later games and asserts nothing moves); salary and position are the week's own snapshot's. Groups (thresholds fixed before any score was read): `PriceGap` at or above +1.0 (up) and at or below -1.0 (down); top third of the week's position (rosterable, at least 6 players) on `xFP/$` (QB RB WR TE), `TPRR~` and `Tgt/$` (RB WR TE), `HVT/$` and `xFP Rec%` (RB, the pass-game backs, added 2026-10-22); and the baseline "everyone with a PriceGap". Per group: `n`, mean actual minus ProjPts, minus CalPts, minus the salary-expected score (a straight line of actual points on salary per position, fit on EARLIER weeks only), the standard error of the CalPts mean, `Z = sign x mean / SE` (positive = the signal pointed the right way; player-games are treated as independent, so it reads generous), the hit rate against CalPts, the weeks it fired in and how many of them beat CalPts. Every row is out of sample by construction (no parameter is fitted to the scores). Ship bar for any promotion: beats CalPts by more than 2 SE on held-out weeks and in most weeks, and Sam says so.
 
@@ -2620,7 +2620,7 @@ rate per label (Weeks 2 and 4-8, walk-forward; `research/plays_backtest.outcome_
 ## Team news (`news_context.py`; the Week page)
 
 Facts, not a model. Every share is over the player's last five games with his team (`usage_weeks.csv`, else the
-Player card's `player_log.csv`); status is DraftKings' on the slate (OUT / IR / D / Q), else this week's injury report
+the game log, `player_log.csv`); status is DraftKings' on the slate (OUT / IR / D / Q), else this week's injury report
 (Out / Doubtful / Questionable).
 
 - **The QB.** The starter is the QB who played 50%+ of the snaps in the team's most recent game. When he is OUT / IR /

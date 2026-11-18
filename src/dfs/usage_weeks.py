@@ -128,7 +128,7 @@ def player_weeks(
     stats: pd.DataFrame | None, pbp: pd.DataFrame | None, snaps: pd.DataFrame | None
 ) -> pd.DataFrame:
     """One row per QB / RB / WR / TE game played (`PLAYER_COLUMNS`). `pbp` None blanks RZ / HVT,
-    `snaps` None (a `player_card.snap_log_frame`) blanks Snap%."""
+    `snaps` None (a `sources.player_log.snap_log_frame`) blanks Snap%."""
     from dfs import results_actual
 
     if stats is None or stats.empty:

@@ -304,7 +304,7 @@ def latest_round(data_dir: Path, week: int) -> dict | None:
 EDGE_COLUMNS_USED = [
     "Id",
     "Name",
-    "NameKey",  # joins the Player card's game log (`week_page.player_log`: the drawer, the salary watch)
+    "NameKey",  # joins the game log (`week_page.player_log`: the drawer, the salary watch)
     "Position",
     "Team",
     "Opp",
@@ -566,7 +566,7 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
 
 
 def _news(data_dir: Path, edge: list[dict] | None, week: int) -> dict:
-    """Teammate news (`news_context`) from the saved games (the usage view's file, else the Player card's
+    """Teammate news (`news_context`) from the saved games (the usage view's file, else the game log's
     last five) and this week's injury report. Fail-soft: {} leaves both fields None."""
     try:
         from dfs import news_context

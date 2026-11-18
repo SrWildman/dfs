@@ -59,8 +59,7 @@ MIN_FIT_PLAYERS = 8  # rosterable players at a position before PriceGap can be f
 # The Edge columns this module fills are `derived.OPPORTUNITY_COLUMNS` / `LAST5_COLUMNS` (EdgeRaw order; the
 # names are the headers the sheet prints).
 FEATURE_COLUMNS = OPPORTUNITY_COLUMNS
-# Last five games played, from the Player card's game log (`player_card.usage_log`): the averages the
-# card used to read from its hidden raw tab.
+# Last five games played, from the game log (`sources.player_log.usage_log`, `data/current/player_log.csv`).
 LAST5_SOURCE = {"Snap% L5": "Snap%", "Tgt L5": "Tgt", "Car L5": "Car", "DK L5": "DK"}
 
 GAME_COLUMNS = [
@@ -308,7 +307,7 @@ def attach_features(frame: pd.DataFrame, games: pd.DataFrame, season: int, week:
 
 def last5_averages(log: pd.DataFrame | None) -> pd.DataFrame:
     """`NameKey, Position` plus `LAST5_COLUMNS`: the mean over each player's last five games PLAYED of the
-    Player card's game log (`player_card.usage_log`). A column he has no value in (a quarterback's targets,
+    game log (`sources.player_log.usage_log`). A column he has no value in (a quarterback's targets,
     snap share when the snap file failed) stays blank, never 0."""
     columns = ["NameKey", "Position", *LAST5_COLUMNS]
     if log is None or log.empty:

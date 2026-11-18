@@ -15,9 +15,10 @@ out) draws the table:
   never looks more trusted than it is.
 - **The Pool column** on every row (the same Cash / GPP / Both / none control the board has; the served page
   writes the sheet's Pool cell, `week_writes`).
-- **The player drawer**: a click on any name anywhere on the page opens everything about him, grouped like the
-  sheet's Player tab (projections by source, ownership, his last five games, the matchup, the props, the
-  signals with their record, his rank in each lens, the Suggested builds that hold him).
+- **The player drawer**: a click on any name anywhere on the page opens everything about him (projections by
+  source, ownership, his last five games game by game with target share and red-zone / inside-the-5 looks,
+  the matchup, PropPts and this week's prop lines by market, the signals with their record, his rank in each
+  lens, the Suggested builds that hold him). It replaced the sheet's Player tab (removal F9).
 - **Charts follow the lens**: Value shows the value map, GPP the leverage map, Usage target share against
   snaps (`week_charts`).
 - **Performance**: 100 rows a page; only the visible page is in the DOM.
@@ -460,11 +461,13 @@ def payload(
     *,
     record_lines: dict[str, str] | None = None,
     log: dict[str, list[dict]] | None = None,
+    prop_lines: tuple[dict[str, list[dict]], str] | None = None,
     practice: dict[str, str] | None = None,
     asof: str = "",
 ) -> dict:
     """The Explorer's data: columns (key, header, group, trust, format, tip), one array per player, the
-    lenses, the Suggested builds per player, the signal records and each player's last five games."""
+    lenses, the Suggested builds per player, the signal records, each player's last five games and his prop
+    lines (`week_page.prop_lines`)."""
     cols = columns()
     group_of = {c: g for g, cs in groups() for c in cs}
     roles = b.role_of()
@@ -516,6 +519,8 @@ def payload(
         "records": record_lines or {},
         "builds": builds,
         "log": log or {},
+        "props": (prop_lines or ({}, ""))[0],
+        "props_note": (prop_lines or ({}, ""))[1],
         "practice": practice or {},
         "team_alias": dict(TEAM_ALIASES),
         "chart_source": "Every priced player in the last sync (OUT and IR left out) that passes the Explorer's "
@@ -811,13 +816,23 @@ function openDrawer(id) {
   sec('Ownership', kv(r, ['CashOwn', 'GppOwn', 'OurOwn', 'Own%', 'Leverage', 'Flags']));
   const log = D.log[id] || [];
   if (log.length) {
-    const t = el('table', 'log'); const h = el('tr'); for (const x of ['Wk', 'Opp', 'Snaps', 'Tgt', 'Car', 'DK']) h.append(el('th', null, x)); t.append(h);
-    for (const g of log) { const tr = el('tr'); for (const x of [g.Wk, g.Opp, g.Snap == null ? '' : Math.round(g.Snap * 100) + '%', g.Tgt, g.Car, g.DK]) tr.append(el('td', null, x == null ? '' : String(x))); t.append(tr); }
-    sec('Last five games', t);
+    const t = el('table', 'log'); const h = el('tr'); for (const x of ['Wk', 'Opp', 'Snaps', 'Tgt', 'Car', 'Tgt share', 'RZ', 'In 5', 'DK']) h.append(el('th', null, x)); t.append(h);
+    const pct = (x) => x == null ? '' : Math.round(x * 100) + '%';
+    for (const g of log) { const tr = el('tr'); for (const x of [g.Wk, g.Opp, pct(g.Snap), g.Tgt, g.Car, pct(g.TgtShare), g.RZ, g.In5, g.DK]) tr.append(el('td', null, x == null ? '' : String(x))); t.append(tr); }
+    const box = el('div'); box.append(t, el('p', 'dim', 'RZ = targets + carries inside the 20; In 5 = inside the 5. A QB has no targets.'));
+    sec('Last five games', box);
   }
   sec('Usage (last five)', kv(r, ['Snap% L5', 'Tgt L5', 'Car L5', 'DK L5', 'Snap%', 'Tgt%', 'WOPR', 'TPRR~', 'xFP/G', 'RZ/G', 'HVT/G']));
   sec('Matchup', kv(r, ['OppPosRank', 'OppEPA', 'OverUnder', 'Spread', 'Implied', 'Pace', 'PROE', 'Wind', 'Roof']));
-  sec('Props', kv(r, ['PropPts', 'PropsGap']));
+  const pr = el('div'); pr.append(kv(r, ['PropPts', 'PropsGap']));
+  const lines = (D.props || {})[id] || [];
+  if (lines.length) {
+    const t = el('table', 'log'); const h = el('tr'); for (const x of ['Market', 'Line', 'Over / Yes', 'Books']) h.append(el('th', null, x)); t.append(h);
+    for (const l of lines) { const tr = el('tr'); for (const x of [l.m, l.line == null ? '' : l.line, Math.round(l.p * 100) + '%', l.books]) tr.append(el('td', null, String(x))); t.append(tr); }
+    pr.append(t);
+  }
+  if (D.props_note) pr.append(el('p', 'dim', D.props_note));
+  sec('Props', pr);
   const sig = el('div'); const edge = v(r, 'Edge');
   const tokens = D.signals.filter((t) => edge.includes(t));
   if (!tokens.length) sig.append(el('p', 'dim', 'No signal chip.'));

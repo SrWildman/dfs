@@ -297,14 +297,31 @@ def make_play(row: dict, kind: str, *, pool: dict[str, str], lev: float | None =
 # -- a signal's own track record (Model Check) ---------------------------------------------------------------
 
 
+def signal_group(token: str) -> str | None:
+    """The Model Check row a `Edge` token is scored in (`results_signals.SIGNAL_GROUPS` / R6 groups)."""
+    from dfs import results_signals, usage_r6
+
+    if token in ("FADE↓", "USAGE↑", "USAGE↓"):
+        return token
+    if token == "INJ+":
+        return "INJ+ confirmed"
+    if token.startswith(usage_r6.PROJ_DOWN):
+        return results_signals.PROJ_DOWN_GROUP
+    if token.startswith(usage_r6.PROJ_UP):
+        return results_signals.PROJ_UP_GROUP
+    if token.startswith(usage_r6.PROPS_UP):
+        return results_signals.PROPS_UP_GROUP
+    if token.startswith(usage_r6.PROPS_DOWN):
+        return results_signals.PROPS_DOWN_GROUP
+    return None
+
+
 def record_line(token: str, table: dict[str, dict] | None, weeks: tuple[int, int] | None) -> str:
     """Model Check's record for the signal behind a chip, in one line: `FADE↓: 67% hit, -2.5 vs CalPts,
     Weeks 1-8 (n=52)`. `table` is `results/signal_table_<season>.csv` by signal group (`week_inputs.
     load_signal_table`); the group is the Model Check row the chip is scored in
-    (`player_card.signal_group`)."""
-    from dfs import player_card
-
-    group = player_card.signal_group(token)
+    (`signal_group`)."""
+    group = signal_group(token)
     if group is None:
         return f"{token}: no Model Check record for this signal"
     rec = (table or {}).get(group)

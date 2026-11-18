@@ -397,20 +397,6 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "hover it for the full reason. Overflow lists are folded under a plus sign.",
     ),
     (
-        "Player",
-        "One page per player. Pick a name in B1 (the only typed cell) and read his projections side by side, "
-        "ownership, his last five games of usage, matchup and game, props, the signals firing on him with "
-        "Model Check's record for each, and how many of your lineups he is in. Everything is a formula "
-        "over EdgeRaw; the sync keeps the data under it fresh.",
-    ),
-    (
-        "Compare",
-        "The Player card for up to four players side by side. Pick names in B1:E1 (the only typed cells) and "
-        "read projections, ownership, usage, opportunity per dollar, matchup and your lineups one column "
-        "each; the best value in a row is green (lowest for Bust% and OppPosRank; salary and ownership are "
-        "never shaded). Compare within one position. Everything is a formula over EdgeRaw.",
-    ),
-    (
         "EdgeRaw",
         "Every player of the week sorted by ValAdj, with the Pool dropdown to add him. Sort or search from "
         "the column headers; saved filter views under Data, then Filter views, give Cash and GPP orders.",

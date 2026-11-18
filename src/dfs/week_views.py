@@ -26,7 +26,7 @@
   the live record (`data/research/calls_history.csv`, from the Week 9 close on), never mixed.
 - **Search and compare** (item 8, `JS`): a search box over every priced player on every view, and a
   compare tray of 2-4 players (added from the search, the drawer, or any name's pool chip) side by side:
-  the Compare tab's rows (`compare_card.SECTIONS`, the same directions and the same "best is green" rule),
+  the compare rows (`week_compare.SECTIONS`: which way is better per row, the best is green),
   every source's projection, the usage trends and ownership.
 
 Pure: every function reads `WeekInputs` and returns HTML / JSON; nothing writes anything.
@@ -38,9 +38,8 @@ import json
 import statistics
 from dataclasses import dataclass, field
 
-from dfs import compare_card as cc
-from dfs import player_card as pc
 from dfs import week_board as wb
+from dfs import week_compare as cc
 from dfs import week_plays
 from dfs.week_page import TRUST, caption, chip_html, e, how_html, num, pn, rich, table
 
@@ -1023,16 +1022,11 @@ def lock_section(inp, lv, live: bool = False) -> str:  # noqa: ANN001 - WeekInpu
 
 
 def compare_spec() -> list[dict]:
-    """The Compare tab's rows (`compare_card.SECTIONS`) as the compare tray reads them: EdgeRaw columns (the
+    """The compare rows (`week_compare.SECTIONS`) as the compare tray reads them: EdgeRaw columns (the
     Explorer's data keys) and which way is better (None = never shaded)."""
     out = []
     for title, rows in cc.SECTIONS:
-        items = []
-        for r in rows:
-            col = "Implied" if r.spec is pc.IMPLIED else r.spec.column
-            if r.spec.source not in (pc.EDGE, pc.DERIVED):
-                continue
-            items.append({"label": r.spec.label, "col": col, "better": r.better})
+        items = [{"label": r.label, "col": r.column, "better": r.better} for r in rows]
         out.append({"title": title, "note": cc.NOTES.get(title, ""), "rows": items})
     return out
 

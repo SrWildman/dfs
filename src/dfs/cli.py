@@ -936,75 +936,6 @@ def setup_cockpit(
     console.print(f"[green]OK[/green] {placed}")
 
 
-@setup_app.command("player-card", short_help="Create the Player tab (one page per player; pick a name).")
-def setup_player_card(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template "
-        "(always the template first).",
-    ),
-) -> None:
-    """Create the `Player` tab right after Edge Finder, or rebuild it. Pick a player in B1 (a dropdown over
-    EdgeRaw's names, the only typed cell) and read everything about him on one page: projections side by
-    side, ownership, his last five games of usage, matchup and game, props, the signals firing on him with
-    Model Check's record for each, and how many of your lineups he is in. Formulas over EdgeRaw plus two
-    hidden raw tabs that `dfs sync` keeps fresh (only on a sheet that has the tab). Template first, then the
-    live week; `dfs doctor` after."""
-    from dfs import nfl_calendar, sheet_player_card
-
-    cfg = _load_config_or_exit()
-    client = SheetsClient(_gs_config(cfg, sheet_id))
-    try:
-        title, url = client.describe()
-        console.print(f"Building the Player card on: [bold]{title}[/bold]\n{url}\n")
-        edge = store.load_current("edge")
-        lines = sheet_player_card.setup(
-            client, cfg, edge, nfl_calendar.current_week(), nfl_calendar.current_season()
-        )
-    except FileNotFoundError as e:
-        console.print(f"[red]{e}[/red] Run `dfs sync` first.")
-        raise typer.Exit(code=1) from e
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-    for line in lines:
-        console.print(f"[green]OK[/green] {line}")
-
-
-@setup_app.command(
-    "compare", short_help="Create the Compare tab (up to four players side by side; pick names)."
-)
-def setup_compare(
-    sheet_id: str = typer.Option(
-        None,
-        "--sheet-id",
-        help="Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template "
-        "(always the template first).",
-    ),
-) -> None:
-    """Create the `Compare` tab right after the Player tab, or rebuild it. Pick up to four players in B1:E1
-    (dropdowns over EdgeRaw's names, the only typed cells) and read the Player card's measures side by side:
-    projections, ownership, usage, opportunity per dollar, matchup and game, and your lineups. The best value
-    in each row is green (lowest for Bust% and OppPosRank; salary and ownership are never shaded). Formulas
-    over EdgeRaw only; a sync that widens EdgeRaw rebuilds it (only on a sheet that has the tab). Needs the
-    Player tab (`dfs setup player-card`) to place it after. Template first, then the live week; `dfs doctor`
-    after."""
-    from dfs import sheet_compare
-
-    cfg = _load_config_or_exit()
-    client = SheetsClient(_gs_config(cfg, sheet_id))
-    try:
-        title, url = client.describe()
-        console.print(f"Building the Compare tab on: [bold]{title}[/bold]\n{url}\n")
-        lines = sheet_compare.setup(client, cfg)
-    except SheetsError as e:
-        console.print(f"[red]Sheets error:[/red] {e}")
-        raise typer.Exit(code=1) from e
-    for line in lines:
-        console.print(f"[green]OK[/green] {line}")
-
-
 @setup_app.command("stacks", short_help="Create the read-only Stacks tab (the QB stack ranker).")
 def setup_stacks(
     sheet_id: str = typer.Option(
@@ -2162,7 +2093,6 @@ def sync(
 
     console.print(f"Syncing week {ctx.week}, season {ctx.season} ({len(source_names)} source(s))...")
 
-    edge_width_before = _edge_width_now(cfg) if "edge" in source_names and not no_upload else None
     results = run_sync(cfg, source_names, ctx, upload=not no_upload)
 
     table = Table(title="Sync results")
@@ -2226,7 +2156,6 @@ def sync(
         _refresh_cockpit(cfg, live_client or SheetsClient(cfg.google_sheets))
 
     if "edge" in source_names and not no_upload:
-        _refresh_player_card(cfg, ctx, edge_width_before=edge_width_before)
         _refresh_native_lookups(cfg)
     if not no_upload:
         _save_bankroll_health(cfg, live_client or SheetsClient(cfg.google_sheets), ctx.season, ctx.week)
@@ -2270,18 +2199,6 @@ def _save_pool_snapshot(
         log.debug("pool snapshot not saved", exc_info=True)
 
 
-def _edge_width_now(cfg: Config) -> int | None:
-    """EdgeRaw's header width before a sync rewrites it (None when unreadable)."""
-    from dfs import sheet_player_card
-
-    try:
-        return sheet_player_card.edge_width(
-            SheetsClient(cfg.google_sheets), cfg.google_sheets.tab_mappings.get("edge", "EdgeRaw")
-        )
-    except Exception:  # noqa: BLE001 - only a hint for a fail-soft step
-        return None
-
-
 def _refresh_native_lookups(cfg: Config) -> None:
     """Plan N: Player Pool's and Lineups' native lookups bake EdgeRaw's Name / NameKey letters; after an edge
     sync, rewrite any a moved EdgeRaw column left stale (`sheet_native_links.refresh_native_lookups`). Silent
@@ -2293,38 +2210,6 @@ def _refresh_native_lookups(cfg: Config) -> None:
             console.print(f"[green]OK[/green] {escape(line)}")
     except Exception as e:  # noqa: BLE001 - never fails the sync
         console.print(f"[yellow]Native lookups not checked: {escape(str(e))}[/yellow]")
-
-
-def _refresh_player_card(cfg: Config, ctx: SyncContext, *, edge_width_before: int | None = None) -> None:
-    """After an edge sync: rewrite the Player card's hidden raw tabs when the sheet has the tab
-    (`sheet_player_card.refresh_raw_if_present`), and the card itself when EdgeRaw's width changed this run
-    (`rebuild_card_if_widened`: Sheets shifts the card's references when the tab grows); the Compare tab
-    (formulas only, no raw tab) is rebuilt on the same widening. Never fails the sync; `dfs setup
-    player-card` / `dfs setup compare` create the tabs."""
-    from dfs import sheet_player_card
-    from dfs.derived import EDGE_DATA_OFFSET, EDGE_SHEET_ORDER
-
-    try:
-        edge = store.load_current("edge")
-    except FileNotFoundError:
-        return
-    ok, line = sheet_player_card.refresh_raw_if_present(
-        SheetsClient(cfg.google_sheets), cfg, edge, ctx.week, ctx.season
-    )
-    if line:
-        console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
-    ok, line = sheet_player_card.rebuild_card_if_widened(
-        SheetsClient(cfg.google_sheets), cfg, edge_width_before, len(EDGE_SHEET_ORDER) + EDGE_DATA_OFFSET
-    )
-    if line:
-        console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
-    from dfs import sheet_compare
-
-    ok, line = sheet_compare.rebuild_if_widened(
-        SheetsClient(cfg.google_sheets), cfg, edge_width_before, len(EDGE_SHEET_ORDER) + EDGE_DATA_OFFSET
-    )
-    if line:
-        console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
 
 
 def _props_plan(
@@ -4737,7 +4622,7 @@ def week_new(
 
     After the sync, a Cockpit tab on the new sheet (a copied template has one) is rewritten from the data just
     synced, so the template's stale render is replaced at once (`_rebuild_cockpit_on_new_sheet`; never fails
-    the week). Likewise a Player tab's hidden raw tabs (`_rebuild_player_card_on_new_sheet`).
+    the week).
 
     Carrying Results forward means copying every already-typed week's row
     (config.toml's `[results]` table -- Week, Cash Pts/Line, H2H Entered/
@@ -5015,7 +4900,6 @@ def week_new(
         _refresh_calls(ctx)
 
     _rebuild_cockpit_on_new_sheet(new_cfg, new_client)
-    _rebuild_player_card_on_new_sheet(new_cfg, new_client, ctx)
     _refresh_stacks(new_cfg, new_client)
 
     if any_failed:
@@ -5033,21 +4917,6 @@ def _rebuild_cockpit_on_new_sheet(cfg: Config, client: SheetsClient) -> None:
         console.print(
             f"[yellow]Cockpit not rebuilt ({escape(str(e))}); `dfs setup cockpit` rebuilds it.[/yellow]"
         )
-
-
-def _rebuild_player_card_on_new_sheet(cfg: Config, client: SheetsClient, ctx: SyncContext) -> None:
-    """Rewrite the Player card's hidden raw tabs on the new week's sheet from the data the sync just saved, so
-    a copied template's raw tabs (last week's players and games) are replaced at once. Only when the sheet
-    has a Player tab (`dfs setup player-card` creates one). NEVER fails `week new`."""
-    from dfs import sheet_player_card
-
-    try:
-        edge = store.load_current("edge")
-    except FileNotFoundError:
-        return
-    ok, line = sheet_player_card.refresh_raw_if_present(client, cfg, edge, ctx.week, ctx.season)
-    if line:
-        console.print(f"[green]OK[/green] {line}" if ok else f"[yellow]{escape(line)}[/yellow]")
 
 
 def _reset_suggested_on_new_sheet(client: SheetsClient) -> None:

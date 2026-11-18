@@ -5,7 +5,7 @@
 the last snapshot before that Sunday's lock), matched on normalised name and team; a player who was not on
 last week's main slate (bye, a prime-time game) has no comparison and is left out, never guessed.
 
-**Steady role**: over his last `LAST_GAMES` games played (the Player card's log), his snap share, or else his
+**Steady role**: over his last `LAST_GAMES` games played (the game log), his snap share, or else his
 targets, each within `STEADY` (10%) of their own average. A drop with a steady role is the flag: the price
 fell while the job did not. A drop without one is listed apart, since the role moved too.
 

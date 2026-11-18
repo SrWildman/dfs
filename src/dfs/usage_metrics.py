@@ -131,7 +131,7 @@ def team_week_totals(stats: pd.DataFrame) -> pd.DataFrame:
 def red_zone_counts(pbp: pd.DataFrame, *, goal_line: int | None = None) -> pd.DataFrame:
     """Per (gsis id, week): `rz` = targets + carries from inside the opponent's 20, `hvt` = the
     same from inside the 10. Real scrimmage plays only (pass/run), no two-point attempts, no
-    deleted plays. With `goal_line` (the Player card's "inside the 5") a `gl` column counts the same
+    deleted plays. With `goal_line` (the game log's "inside the 5") a `gl` column counts the same
     from inside that yard line; without it the frame is exactly what it always was."""
     plays = pbp
     if "season_type" in plays.columns:
