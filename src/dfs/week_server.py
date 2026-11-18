@@ -263,7 +263,7 @@ def reason_answer(ctx: Context, data: dict) -> dict:
 
 
 def lock_answer(ctx: Context, data: dict) -> dict:
-    """A Swap / Keep / Look later on a Lock-state row (blueprint C2): recorded in the decisions log, nothing
+    """A Swap / Keep / Later on a Lock-state row (blueprint C2): recorded in the decisions log, nothing
     written to any sheet (the Lineups tab is only read, to find the row as the page showed it)."""
     from dfs import decisions_log, lock_state
 

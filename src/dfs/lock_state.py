@@ -1040,6 +1040,7 @@ class LockView:
     answered: dict[str, dict]  # Lock-state row key -> the latest answer (decisions log)
     synced: datetime | None
     has_log: bool  # this week has rows in the change log
+    sources: tuple = ()  # the lineups checked (`inactives.Source`), as `lineup_sources` chose them
 
 
 def last_sync(manifest: Mapping[str, dict]) -> datetime | None:
@@ -1122,10 +1123,12 @@ def view(inp, live_lineups: list[dict] | None = None) -> LockView:  # noqa: ANN0
         news_tile(inp.edge, sources, inp.now, synced),
         health_tile(checks),
     ]
-    return LockView(st, base, changes, checks, late, tiles, where, answered, synced, bool(inp.changes))
+    return LockView(
+        st, base, changes, checks, late, tiles, where, answered, synced, bool(inp.changes), tuple(sources)
+    )
 
 
-# -- an answer to a row (Swap / Keep / Look later) -----------------------------------------------------------
+# -- an answer to a row (Swap / Keep / Later) -----------------------------------------------------------
 
 ACTIONS = ("swap", "keep", "later")
 
@@ -1189,7 +1192,7 @@ def message(row: Row, action: str, lineups: Sequence[str]) -> str:
             f"({sw.into.position} {sw.into.team}, ${sw.into.salary:,}, {sw.gain:+.1f} pts). "
             "Recorded; nothing was written to the sheet."
         )
-    word = {"swap": "Swap", "keep": "Keep", "later": "Look later"}[action]
+    word = {"swap": "Swap", "keep": "Keep", "later": "Later"}[action]
     return f"{word} recorded for {row.name}. Nothing was written to the sheet."
 
 

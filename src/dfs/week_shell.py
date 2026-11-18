@@ -166,17 +166,24 @@ def sunday_facts(inp: WeekInputs, lv) -> list[Fact]:  # noqa: ANN001
     n = len(ch.act) + len(ch.none) + ch.other
     since = lv.base.at
     news = Fact(
-        "News", f"{n} change{'s' if n != 1 else ''}", f"since {kickoff.format_et(since, suffix=False)}"
+        "News",
+        f"{n} change{'s' if n != 1 else ''}",
+        f"since Sat night ({kickoff.format_et(since, suffix=False)})",
     )
-    risky = {
-        t
-        for r in [*ch.act, *ch.none]
-        if r.status in ("OUT", "IR", "D", "Q") and not r.started
-        for t in r.touches
-    }
+    # players at risk (Sam, 2026-11-18): each OUT / D / Q player in a lineup once, with the lineups he is in
+    from dfs import week_sunday
+
+    risky = week_sunday.at_risk(lv)
+    players = {r.player_id for r in risky}
+    held = week_sunday.lineups_holding(lv, risky)
     health = _tile(lv, "health")
-    if risky:
-        lineups = Fact("Lineups", f"{len(risky)} at risk", "hold an OUT / D / Q player", "warn")
+    if players:
+        lineups = Fact(
+            "Lineups",
+            f"{len(players)} player{'s' if len(players) != 1 else ''} at risk",
+            f"OUT / D / Q, in {', '.join(held)}",
+            "warn",
+        )
     elif health is not None and health.value != "-":
         lineups = Fact("Lineups", "none at risk", "no OUT / D / Q player in them")
     else:

@@ -137,14 +137,20 @@ def chalk_html(
     prev: dict[str, float] | None = None,
     ds: list | None = None,
     live: bool = False,
+    lineup: tuple[list[str], str] | None = None,
+    controls: bool = True,
+    foot: str | None = None,
+    how: str = CHALK_HOW,
 ) -> str:
     """The card. `prev` (Sunday) maps a name to his CashOwn at the baseline, for the move column; `ds` are the
     page's chalk decisions (`week_board.decisions`): a row with one carries its Play / Fade (`cash: Name` on
-    Always use / Never use), the same answer the old decisions block gave."""
+    Always use / Never use), the same answer the old decisions block gave. `lineup` is (names, where) when the
+    caller knows the cash lineup (Sunday: the Lineups tab's cash lineups); `controls=False` leaves out the
+    Play / Fade column (Sunday writes no sheet) and `foot` replaces the footer."""
     from dfs.week_top import _cash_controls
 
     by_id = {wb.pid(d.row): d for d in ds or [] if d.kind == "chalk" and d.row}
-    names, where = your_cash_lineup(inp)
+    names, where = lineup if lineup is not None else your_cash_lineup(inp)
     rows = chalk_not_on(inp, names)
     title = "Chalk you're not on"
     if not names:
@@ -173,26 +179,33 @@ def chalk_html(
             f'<div class="meta">{e(wb.why_facts(r, ranks))}</div></td>'
             f'<td class="n hm">{_money(r.get("Salary"))}</td><td class=n><b>{_f(r.get("CalPts"))}</b></td>'
             f'<td class="n"><b>{pct(own)}</b></td>'
-            + (f'<td class="n hm">{e(move)}</td>' if prev is not None else "")
-            + f'<td class="acts"><span class="opts">{_cash_controls(by_id.get(wb.pid(r)), live)}</span></td>'
+            + (f'<td class="n">{e(move)}</td>' if prev is not None else "")
+            + (
+                f'<td class="acts"><span class="opts">{_cash_controls(by_id.get(wb.pid(r)), live)}</span></td>'
+                if controls
+                else ""
+            )
             + "</tr>"
         )
     own_chip = chip_html(*TRUST["plays_own"])
     head = (
         '<tr><th>Player</th><th class="n hm">Salary</th><th class="n">Proj</th>'
         f'<th class="n">Cash own {own_chip}</th>'
-        + ('<th class="n hm">since Sat night</th>' if prev is not None else "")
-        + "<th></th></tr>"
+        + ('<th class="n">since Sat night</th>' if prev is not None else "")
+        + ("<th></th>" if controls else "")
+        + "</tr>"
     )
     return card(
         sid,
         title,
         f'<div class="sec-b flush"><table class="t">{head}{"".join(body)}</table></div>',
         sub=f"30%+ projected cash ownership, not in {e(where)}",
-        foot="The double-up field is expected to play them and your lineup does not. Play writes "
+        foot=foot
+        if foot is not None
+        else "The double-up field is expected to play them and your lineup does not. Play writes "
         "<code>cash: Name</code> on Always use, Fade on Never use (cash builds only); then rerun cash.",
         cls="dec",
-        how=CHALK_HOW,
+        how=how,
     )
 
 
