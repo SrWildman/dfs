@@ -46,6 +46,7 @@ def browser():
 
 class Served:
     def __init__(self, tmp_path):
+        self.tmp_path = tmp_path
         self.rows = rows_with_more_wrs(**OWN)
         self.rows += [
             row(
@@ -844,3 +845,37 @@ def test_the_sunday_view_opens_by_itself_and_swap_records_without_a_sheet_write(
         assert errors == []
     finally:
         s.close()
+
+
+def test_the_stale_notice_is_one_line_at_both_widths_with_the_rest_behind_a_click(browser, served):
+    """Sam, 2026-11-18: the yellow notice was three lines on a desktop and seven on a phone. Now: what is
+    stale and the one command that fixes it, on one line; every sentence behind the click."""
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    old = (datetime.now(UTC) - timedelta(days=3)).isoformat()
+    manifest = {
+        "edge": {"synced_at": old, "error": None},
+        "tffb": {"synced_at": old, "error": "login expired"},
+        "tffb_gps": {"synced_at": old, "error": None, "pending": "GPS not published"},
+    }
+    (served.tmp_path / "data" / "manifest.json").write_text(json.dumps(manifest))
+    for width, height in ((1440, 900), (390, 844)):
+        ctx = browser.new_context(viewport={"width": width, "height": height})
+        pg = ctx.new_page()
+        pg.goto(served.url)
+        until(pg, "!!window.dfsViews")
+        summary = pg.locator("#stale-note summary")
+        assert "dfs sync" in summary.inner_text() and "+2 more" in summary.inner_text()
+        box = summary.bounding_box()
+        line = pg.evaluate(
+            "parseFloat(getComputedStyle(document.querySelector('#stale-note summary')).lineHeight)"
+        )
+        assert box["height"] <= line + 2, (width, box)  # one line
+        assert pg.evaluate("document.documentElement.scrollWidth") <= width  # and no sideways scroll
+        assert not pg.locator("#stale-note li").first.is_visible()
+        summary.click()
+        items = pg.locator("#stale-note li")
+        assert items.count() == 3 and items.first.is_visible()
+        assert "login expired" not in items.all_inner_texts()[0] and "tffb" in items.all_inner_texts()[0]
+        ctx.close()
