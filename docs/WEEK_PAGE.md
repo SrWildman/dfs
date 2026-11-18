@@ -7,8 +7,8 @@ rules that are never broken (the served page's guards among them) stay in `CLAUD
 
 Every part below was built in a named round (Plans I, J, K, K2, N, O, O2; blueprint Phases A-D; the design pass); the
 names are kept in parentheses so a session can find the round's planning notes, but the page is described as it is now.
-The design pass (PR #92, 2026-11-17; `docs/planning/audit/DESIGN_PASS_2026-11.md`) put one shell and one design system
-around the page: the shell and the Saturday view come first below; every older block is still on the page, on a
+The design pass (PRs #92-#94, 2026-11-17 and 18; `docs/planning/audit/DESIGN_PASS_2026-11.md`) put one shell and one
+design system around the page and rebuilt the three day views: the shell and the Saturday view come first below; every older block is still on the page, on a
 More view and on Everything.
 
 ## The shell: day views, status lines, This week, More (`week_shell.py`, `week_style.py`)
@@ -17,6 +17,15 @@ More view and on Everything.
   `week_shell.DAYS`), player search (`#psearch`, `/` focuses it) and **Ask Claude**. Every day view is reachable on any
   day; the clock (`lock_state.state`) only picks the one that opens first, and carries the "now" dot. The last view is
   kept per week and clock state (`dfs-view-<season>-<week>-<state>`), so Saturday's choice never hides Sunday's page.
+- **The stale notice** (under the header, every view; `week_shell.stale_html` over `week_today.stale_notes`; Sam,
+  2026-11-18): one line, the most urgent thing that is out of date (`Stale.short`), the one command that fixes it
+  (`Stale.fix`) and "+N more"; a click opens every sentence (`Stale.text`, the same words `stale_items` returns) with
+  its fix. Most urgent first: nothing synced, a failed source, data past `launcher.STALE_HOURS`, then stale builds
+  (`dfs lineups suggest --iterate`); on Sunday a late swap older than the sync (`dfs lineups late-swap`) comes before
+  the builds; the season-long view (`dfs season sync`); a pending source last, since nothing fixes it. Amber; grey when
+  that is all there is. Always `section#stale-note` (empty when fresh), so the served page's refresh replaces it and
+  keeps it open. Tests: `tests/test_week_tuesday.py` (the order, the fixes, the HTML) and the browser test that it is
+  one line at 1440 and 390 px.
 - **The chat starts folded on every load**, at every width: there is no rail, **Ask Claude** opens it, and nothing
   remembers it open (`week_live`, the `chat-open` / `chat-closed` body classes).
 - **A status line per day** (`week_shell.status_lines`; Sam, 2026-11-17), grey, amber or green only for an outlier:
@@ -276,20 +285,35 @@ blueprint C2's `lock_state.LockView`, in the order he reads it on Sunday morning
 
 ## Tuesday: the Close view
 
-- **The Close view** (blueprint Phase D; `close_view.py` pure, `week_learn.close_section`, `scorecard.scorecards`, `edge_at_lock.py`,
+- **The Tuesday view** (the design pass, PR #94; `week_tuesday.py`, pure; Sam, 2026-11-17): the closed week in six
+  blocks, each a `section[id]`:
+  1. **The week, closed** (`#close-card`): the sentence (`close_view.week_line`) with **the one thing worth changing**
+     (`close_view.one_thing`) directly under it; before the close, "not run yet" and "close the week";
+  2. **What decided it** (`#close-decided`), cash own predicted → actual;
+  3. **You against the nearest build** (`#close-vs`);
+  4. **Scorecards** (`#close-scores`): the four tiles (`week_learn.close_tiles`), then the model table;
+  5. **The ledger** (`#close-ledger`; the Ledger and plan view keeps `#ledger`), folded to `ledger_line`;
+  6. **The decision log** (`#decision-log`, `week_learn.decision_log_body`), folded to "N decisions this week".
+
+  The side adds **Next: Week N+1** (`#next-week`, `next_html`: say "start week N+1" with the new sheet's URL; a
+  sentence, not a button). What won last week sits below, one line (open on Monday only, `week_page.OPEN_ON_DAY`).
+  Tests: `tests/test_week_tuesday.py`, `tests/test_close_view.py`.
+- **The Close view's content** (blueprint Phase D; `close_view.py` pure, `scorecard.scorecards`, `edge_at_lock.py`,
   `decisions_log.py`): the Week page's **Tuesday** view (`#close`; the clock's `close` state opens it), the closed week on one
   screen from the `close` input that `dfs week review` (run by `week close`) saves: the week line (`close_view.week_line`: his
   double-up points against the double-up cash lines, how many cashed, the share of the field beaten = median of `1 - pct` from
-  `decisions.csv`, the net from the contest log), **what decided it** (the cash post-mortem's top five, tagged `you had him` / `a
-  choice` / `variance`), **you against the build** (`scorecard.csv`'s overrides, week and season; "too few to call" under 12 weeks;
-  "the Default" once Phase A saved a `cash_core`, "the nearest build" before), the **four scorecards** (Projection: CalPts vs TFFB
-  MAE; Ownership: ours vs TFFB's Own% (GPP) and the double-up curve (cash), the weaker format's status; Calibration: Cash % shown
-  vs cashed, `cash_shown.csv`; Edge at lock: the status from the REALIZED margin by week, his cash lineups' actual points minus
-  the field's mean actual points, the projected edge and percentile its "on paper" text; Sam, 2026-11-17), each Proven / Not proven / Overstated / New (the rules in `docs/CALCULATIONS.md`),
-  the ledger (Phase B's section, as `#close-ledger`), four tiles (edge at lock "on paper", the projected edge as an early warning, avoidable errors = blank entries, calibration gap,
-  cash percentile by week), **the one thing** (`close_view.one_thing`: the first of blueprint 13.3's monthly triggers that fires,
-  else "Nothing"; its edge trigger reads the projected edge and says "on paper") and the **decision log** fold (`decisions_log.read`, reason pills; on the served page one tap posts
-  `/api/reason`, a new line in `data/week/decisions.jsonl`, never a sheet write). **Edge at lock**
+  `decisions.csv`, the net from the contest log), **the one thing** (`close_view.one_thing`: the first of blueprint 13.3's
+  monthly triggers that fires, else "Nothing"; its edge trigger reads the projected edge and says "on paper"), **what decided
+  it** (the cash post-mortem's top five, tagged `you had him` / `a choice` / `variance`), **you against the build**
+  (`scorecard.csv`'s overrides, week and season; "too few to call" under 12 weeks; "the Default" once Phase A saved a
+  `cash_core`, "the nearest build" before), four tiles (edge at lock "on paper", the projected edge as an early warning,
+  avoidable errors = blank entries, calibration gap, cash percentile by week), the **four scorecards** (Projection: CalPts vs
+  TFFB MAE; Ownership: ours vs TFFB's Own% (GPP) and the double-up curve (cash), the weaker format's status; Calibration: Cash %
+  shown vs cashed, `cash_shown.csv`; Edge at lock: the status from the REALIZED margin by week, his cash lineups' actual points
+  minus the field's mean actual points, the projected edge and percentile its "on paper" text; Sam, 2026-11-17), each Proven /
+  Not proven / Overstated / New (the rules in `docs/CALCULATIONS.md`), the ledger (Phase B's section) and the **decision log**
+  (`decisions_log.read`, reason pills; on the served page one tap posts `/api/reason`, a new line in
+  `data/week/decisions.jsonl`, never a sheet write). **Edge at lock**
   (`data/contests/edge_at_lock.csv`, one row per distinct lineup of his per contest with standings): his nine summed on the
   **four-source consensus** (TFFB `ProjPts`, `SleeperPts`, `FantasyProsPts`, `EspnPts`; props are not in it) against every lineup
   of the field, from the last EdgeRaw snapshot before the lock (`sim.retro.edge_snapshot_before`; a week whose newest snapshot is
@@ -303,8 +327,8 @@ blueprint C2's `lock_state.LockView`, in the order he reads it on Sunday morning
 - **Plan K2, the learning loop** (`week_learn.py` on the page; `dfs week review [--week N]`, `week_review.py`, which
   `week close` runs at its end, fail-soft; files only, saved as inputs under the closed week): **what won**
   (`field_review.py`: each contest type's winner and last paid place with own sum / salary left / stack shape, the
-  field's QB stack / bring-back / salary left / RB-in-FLEX / top stacks, Sam's lineups beside it; first and open
-  Monday and Tuesday), the **process scorecard** under Last week and in the close output (`scorecard.py`: tier spend
+  field's QB stack / bring-back / salary left / RB-in-FLEX / top stacks, Sam's lineups beside it; open on Monday,
+  one line every other day: on Tuesday the Close view leads), the **process scorecard** under Last week and in the close output (`scorecard.py`: tier spend
   from `tier_week`, `cash:` chalk answers on the last round's rules against his cash lineups, each lineup against
   its nearest build of its kind, edited (8+ shared) or his own; `data/contests/scorecard.csv` gives the season line),
   **exposure against the field** (`exposure.py`: GPP entries per contest entry against GppOwn this week, against
