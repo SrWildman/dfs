@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from dfs import week_board as wb
 from dfs import week_compare as cc
 from dfs import week_plays
-from dfs.week_page import TRUST, caption, chip_html, e, how_html, num, pn, rich, table
+from dfs.week_page import TRUST, caption, chip_html, e, how_html, num, pn, rich
 
 POSITIONS = week_plays.POSITIONS
 SKILL = ("QB", "RB", "WR", "TE")
@@ -845,8 +845,8 @@ def model_section(inp) -> str:
 # -- the Lock state (blueprint Phase C2; `lock_state.py`) ---------------------------------------------------
 
 
-LOCK_ACTIONS = (("swap", "Swap"), ("keep", "Keep"), ("later", "Look later"))
-ANSWER_WORD = {"swap": "Swap", "keep": "Keep", "later": "Look later"}
+LOCK_ACTIONS = (("swap", "Swap"), ("keep", "Keep"), ("later", "Later"))
+ANSWER_WORD = {"swap": "Swap", "keep": "Keep", "later": "Later"}
 
 
 def _signed(x: float | None, digits: int = 1, unit: str = " pts") -> str:
@@ -946,18 +946,6 @@ def _what_line(r) -> str:  # noqa: ANN001
     return (pn(r.name, r.team, r.player_id) + e(rest)) if rest or r.what == r.name else e(r.what)
 
 
-def _check_rows(checks) -> str:  # noqa: ANN001
-    out = []
-    for c in checks:
-        cls = "bad" if c.ok is False else ("unk" if c.ok is None else "fine")
-        mark = "!" if c.ok is False else ("?" if c.ok is None else "✓")
-        out.append(
-            f'<div class="chk {cls}" data-key="{e(c.key)}"><span class="mk">{mark}</span>'
-            f"<div><b>{e(c.text)}</b><br><span>{e(c.detail)}</span></div></div>"
-        )
-    return '<div class="chks">' + "".join(out) + "</div>"
-
-
 def _late_rows(late) -> str:  # noqa: ANN001
     if not late:
         return '<p class="dim">No player in your lineups plays after the first kickoff, or every game has started.</p>'
@@ -981,80 +969,6 @@ def _late_rows(late) -> str:  # noqa: ANN001
             f'<tr class="lw-head"><th colspan=2>{e(lu.label)} <span class=dim>{e(contests)}</span></th></tr>{items}'
         )
     return '<div class="scroll"><table class="late">' + "".join(rows) + "</table></div>"
-
-
-def lock_section(inp, lv, live: bool = False) -> str:  # noqa: ANN001 - WeekInputs, lock_state.LockView
-    """The Lock state, first on screen Sunday morning: the change list, the checklist, the late window."""
-    from dfs import lock_state as ls
-
-    if lv is None:
-        return (
-            '<section class="card" id="lock-card"><div class="card-head"><h2>Sunday: what changed</h2></div>'
-            "<p>Nothing to show: no slate synced.</p></section>"
-        )
-    where = f" · lineups: {e(lv.where)}" if lv.where else ""
-    head = (
-        f'<section class="card" id="lock-card" data-state="{e(lv.state)}"><div class="card-head">'
-        f"<h2>What changed {e(lv.base.label)}</h2>"
-        f'<span class="asof">sorted by points at stake{where}</span></div>'
-    )
-    cl = lv.changes
-    parts = [head]
-    if not lv.has_log:
-        last = f"last sync {ls.when(lv.synced)}" if lv.synced else "no sync on file"
-        parts.append(f'<p class="ok">No change logged this week yet ({e(last)}).</p>')
-    if cl.act:
-        body = [
-            [_seen(r), _what(r), _who(r), _touch(r), _swap_cell(r), _lock_buttons(r, lv.answered, live)]
-            for r in cl.act
-        ]
-        parts.append(
-            table(
-                ["Seen", "What happened", "Who gains / loses", "Touches", "Best swap", ""],
-                body,
-                cls="lock",
-                how=(
-                    "news change log (`data/news/changes.csv`) netted from the baseline: one row per player whose "
-                    "status, CalPts (1+ pt) or ownership (5+ points) moved, or whose status is OUT / D / Q now; rows "
-                    "that touch your lineups first, then your pool, by points at stake. Best swap = the inactives "
-                    "check's pivot (same slot, salary he frees plus what the lineup leaves, game not started, clean "
-                    "status; CalPts for cash, Leverage for GPP), offered when the change went against him and it "
-                    f"gains {ls.MIN_SWAP_GAIN:g}+ pts. Swap records your choice; you make it on DraftKings"
-                ),
-                src=("changes.csv", "EdgeRaw Avail / CalPts / CashOwn / GppOwn / GameStart / Salary"),
-            )
-        )
-    elif lv.has_log and not cl.none:
-        last = f" (last sync {ls.when(lv.synced)})" if lv.synced else ""
-        parts.append(f'<p class="ok">No change {e(lv.base.label)}{e(last)}.</p>')
-    elif lv.has_log:
-        parts.append('<p class="ok">Nothing that changed has a better swap.</p>')
-    if cl.none or cl.other:
-        items = "".join(_none_row(r) for r in cl.none)
-        other = (
-            f'<li class="dim">{cl.other} other change{"s" if cl.other != 1 else ""} touch no lineup and no '
-            "pooled player</li>"
-            if cl.other
-            else ""
-        )
-        parts.append(
-            f'<details class="noact"><summary>No action needed ({len(cl.none)}) '
-            f'<span class="dim">touches your lineups or pool, but nothing better fits</span></summary>'
-            f'<ul class="noact">{items}{other}</ul></details>'
-        )
-    parts.append(
-        '<h3 class="sub">Pre-lock checklist <span class="dim">grey when fine, amber only when wrong</span></h3>'
-    )
-    parts.append(_check_rows(lv.checks))
-    parts.append(
-        '<h3 class="sub">Late window <span class="dim">your players in later games, what could still be swapped</span></h3>'
-    )
-    parts.append(_late_rows(lv.late))
-    parts.append(
-        '<p class="dim">Information only: nothing here blocks or writes a sheet. Swap records your choice and '
-        "names the swap; you make it on DraftKings.</p></section>"
-    )
-    return "".join(parts)
 
 
 def compare_spec() -> list[dict]:
@@ -1136,16 +1050,9 @@ __all__ = [
 # -- the client half (both pages): views, usage, search, compare ------------------------------------------------
 
 CSS = """
-#lock-card table.lock td{vertical-align:top}#lock-card .up{color:var(--proven)}
-.tch{display:inline-block;font-size:11px;padding:1px 6px;border-radius:9px;background:var(--line);margin:1px}
-.tch.pool{background:none;border:1px solid var(--accent);color:var(--accent)}
 .lockbtns{display:flex;gap:4px}.lockbtn{padding:5px 10px}.lockbtn.primary{background:var(--accent);color:#fff}
 tr.done td{opacity:.55}.answered{font-weight:600;color:var(--dim)}
 ul.noact{list-style:none;padding:0;margin:6px 0}ul.noact li{padding:5px 0;border-top:1px solid var(--line)}
-.chks{border:1px solid var(--line);border-radius:8px;overflow:hidden}
-.chk{display:flex;gap:10px;padding:8px 12px;border-top:1px solid var(--line)}.chk:first-child{border-top:0}
-.chk .mk{width:18px;text-align:center;color:var(--dim)}.chk span{color:var(--dim);font-size:13px}
-.chk.bad{background:var(--flag)}.chk.bad b,.chk.bad .mk{color:var(--warn)}
 table.late th{text-align:left;padding-top:10px}h3.sub{font-size:13px;text-transform:uppercase;letter-spacing:.04em;
 margin:18px 0 6px}h3.sub .dim{text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px}
 .vsearch{position:relative}

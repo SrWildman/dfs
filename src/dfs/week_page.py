@@ -1767,6 +1767,7 @@ def render(
         week_shade,
         week_shell,
         week_style,
+        week_sunday,
         week_top,
         week_ui,
         week_views,
@@ -1894,13 +1895,13 @@ def render(
             f"<title>Week {inp.week}, {inp.season}</title>"
             f"<style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}"
             f"{week_top.CASH_CSS}{week_money.LEDGER_CSS}{week_top.STRIP_CSS}{week_learn.CLOSE_CSS}"
-            f"{week_style.CSS}</style>"
+            f"{week_style.CSS}{week_sunday.CSS}</style>"
             f'</head><body data-state="{e(st)}"><main>'
             + week_shell.header_html(inp, st, live, sub, week_shell.stale_text(stale))
             + "".join(wrap(lines[k], f"status-{k}") for k in ("build", "lock", "close"))
             + '<div class="layout"><div class="mainc">'
             + saturday
-            + wrap(week_views.lock_section(inp, lv, live), "lock")
+            + wrap(week_sunday.sunday_html(inp, lv, live), "lock")  # the design pass's Sunday
             # blueprint Phase D: the closed week on one screen (the clock's `close` state opens it)
             + wrap(week_learn.close_section(inp, live).html(), "close")
             + "".join(folds)

@@ -346,15 +346,22 @@ row per changed value with the time the sync saw it. `dfs lineups late-swap --re
 in the file is ever rewritten. `dfs news changes` prints the week's status changes (`--field all` for everything, `--player` for
 one name); `dfs news backfill` loads the file from the saved snapshots. Nothing on the sheet reads it; the Week page's Sunday view does.
 
-**Sunday before lock: the Week page's Sunday view.** From Sunday morning the Week page (`dfs week serve`) opens on **Sunday**: five
-tiles at the top (time to lock, entered vs planned, open decisions, news pending, lineup health), then **what changed since the build
-your lineups came from**: every status, projection and ownership move that touches a lineup on the Lineups tab or your pool, the ones
-with a better swap first, sorted by the points at stake, each with the swap the inactives check would make. Any OUT / D / Q player in
-a lineup or the pool stays on the list until he is out of it. It reads the Lineups tab fresh on each refresh, so rebuild as often as
-you like; you never need to record entries for it. **Swap** records your choice and shows the swap to make on DraftKings, **Keep** and
-**Skip** record that you saw it; none of them writes the sheet. Below it, the four-line pre-lock checklist (grey when fine, amber only
-when wrong) and the late window (your players in later games). Every late-swap run is now also kept in
-`data/cockpit/late_swaps.jsonl`.
+**Sunday before lock: the Week page's Sunday view.** From Sunday morning the Week page (`dfs week serve`) opens on **Sunday**
+(the Saturday and Tuesday tabs stay one click away). The status line reads Lock · News (changes since Saturday night) · Lineups
+(the OUT / D / Q players in a lineup, and which lineups) · Swaps open · Entered. Then, in order:
+
+1. **What changed since Saturday night** (since the build your lineups came from, else Saturday 9 pm): the high-priority inactives
+   first (any OUT / D / Q player in a lineup, the Default or your pool, listed while he is there whatever the time of the change),
+   then the moves that have a better swap, sorted by the points at stake; the rest of what moved is one "No action needed" fold.
+   A player whose news reaches a lineup only through his teammates says so. It reads the Lineups tab fresh on each refresh, so
+   rebuild as often as you like; you never need to record entries for it. **Swap** (only when there is one) records your choice
+   and shows the swap to make on DraftKings, **Keep** and **Later** record that you saw it; none of them writes the sheet.
+2. **Chalk you're not on**: every 30%+ projected cash ownership player in the latest sync who is in none of your cash lineups, with
+   his move since Saturday night (Week 9's CeeDee Lamb: 20% Saturday night, 41% at 12:40 pm Sunday). Information; no button.
+3. **Before lock**: the four checks, one line each (grey when fine, amber only when wrong).
+4. **Late window**, folded to one line (your players in later games and what could still swap).
+
+Every late-swap run is now also kept in `data/cockpit/late_swaps.jsonl`.
 
 After `dfs sync`, the **Lineups** tab also shows `Typical`, `Big night`, `Cash %` and `Top 1%` (the chance of the top-1% line;
 green at 2% or more) on every built lineup's Total row (set its Cash/GPP marker in column A) and a
