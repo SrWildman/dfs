@@ -22,7 +22,10 @@ More view and on Everything.
 - **A status line per day** (`week_shell.status_lines`; Sam, 2026-11-17), grey, amber or green only for an outlier:
   - Saturday (`saturday_facts`): Lock · Pool (by position) · Builds · News (the last day of the change log before a
     build, `NEWS_WINDOW`; since the build after) · Entered;
-  - Sunday (`sunday_facts`): Lock · News since Saturday night · Lineups at risk · Swaps open · Entered;
+  - Sunday (`sunday_facts`): Lock · News since Saturday night · Lineups: players at risk (each OUT / D / Q player
+    really in a lineup, the Default when none is on file, counted once and with the lineups that hold him; news that
+    reaches a lineup only through a teammate is not counted, `week_sunday.at_risk` / `lineups_holding`) · Swaps open ·
+    Entered;
   - Tuesday (`tuesday_facts`): Week net · Cash x of y · Scorecards · Next.
 
   An item that waits on a step says what it waits for: "not run yet" never takes a row.
@@ -226,23 +229,46 @@ More view and on Everything.
 
 ## Sunday: the Lock state
 
-- **The Lock state** (blueprint Phase C2; `lock_state.py` pure, `week_views.lock_section`, `week_top.strip_html`): the Week page knows
+The Sunday view (`#lock`) is drawn by **`week_sunday.py`** (pure; design pass PR 2, Sam, 2026-11-17 and 11-18) from
+blueprint C2's `lock_state.LockView`, in the order he reads it on Sunday morning. Its four cards:
+
+1. **What changed since Saturday night** (`#lock-card`, leads; `changed_html`, `lead_rows`): the high-priority inactives
+   first (an OUT / D / Q player in a lineup, the Default or the pool, `is_inactive`), then the week's movement that has a
+   better swap; each group in a lineup before pool-only, then by points at stake. The rest of what moved is one fold, "No
+   action needed". A row whose news touches lineups only through teammates says so and shows its "who gains / loses"
+   line. Rows are a responsive grid (they read at 390 px). **Swap** shows only when there is a swap to make; **Keep** and
+   **Later** (it was "Look later") always.
+2. **Chalk you're not on, Sunday** (`#chalk-sun`, `chalk_html`): every 30%+ CashOwn player in the latest sync who is in
+   none of his cash lineups (the Lineups tab's cash lineups before lock, the recorded entries after, the Default when
+   there are none; `cash_lineup`), not OUT or IR, with his **move since Saturday night** (the change log's cash
+   ownership at the baseline, `own_at_baseline`), shown on phones too. Information: no button, no sheet write.
+   `tests/test_week_sunday.py` replays Week 9's real Sunday snapshots (`tests/fixtures/week9_sunday/`, 15 players)
+   against Sam's real L1 and finds CeeDee Lamb at 11:57 am ET (36%, +17) and 12:40 pm (41%, +21), and 19.7% at
+   Saturday's last sync.
+3. **Before lock** (`#prelock`, `checks_html`): the four checks below, one line each; the detail truncated on a fine
+   line, in full on an amber or unknown one.
+4. **Late window** (`#late`, `late_html`): folded to one line ("11 players in later games across 8 lineups; 0 could
+   still swap for more"), the table inside.
+
+`lock_state.LockView.sources` names the lineups it checked. The rules underneath are C2's, below.
+
+- **The Lock state** (blueprint Phase C2; `lock_state.py` pure, drawn by `week_sunday.py` since the design pass): the Week page knows
   the clock (`lock_state.state`: `lock` from 13 hours before the main slate's first kickoff until 3.5 hours after its last, `close`
-  after or on a closed week, `build` otherwise) and opens on it (`close` opens the Close view, Phase D below); five **tiles** (time to lock, entered vs planned, open decisions, news pending, lineup health;
-  drawn as a strip at the top until the design pass, now feeding the Sunday status line, `week_shell.sunday_facts`;
-  `week_top.strip_html` is no longer drawn). The **Sunday view** (`#lock`): **what changed
+  after or on a closed week, `build` otherwise) and opens on it (`close` opens the Close view, Phase D below); `LockView.tiles` (time to lock, entered vs planned,
+  open decisions, news pending, lineup health) feed the Sunday status line (`week_shell.sunday_facts`); the five-tile
+  strip they were drawn as until the design pass is gone. The **Sunday view** (`#lock`): **what changed
   since the build his lineups came from** (`lock_state.baseline`: the newest suggest round the Lineups-tab lineups match, 8+ of 9,
   else the latest round, else Saturday 9 pm ET; Sam, 2026-11-17), from `data/news/changes.csv` netted per player and field
   (`net_changes`), one row per player (status > projection > ownership), only rows touching a lineup or the pool, a status row
-  carrying the teammates who moved and touching their lineups; the rows **with a better swap** first (`best_swap` = the inactives
+  carrying the teammates who moved and touching their lineups; the rows **with a better swap** first (after the inactives, card 1 above) (`best_swap` = the inactives
   check's pivots, the first gaining 0.5+ CalPts, on the lineups the move went against), sorted by points at stake, then a collapsed
   "No action needed". **Sticky**: any player in a lineup, the Default or the pool whose current status is OUT / IR / D / Q is listed
   whatever the time of the change ("a rebuild must never hide a live problem"). A backup's status change (projected under 5) and IR
   moves are counted, never rows. Before lock the lineups are **the Lineups tab read fresh** (the served page reads it on every render,
   `week_writes.LiveSheet.lineups`; the static page uses the last read the sync saved); recorded entries only after lock. **Never asks
-  him to record entries.** A four-line **pre-lock checklist** (no inactive player; late-game players in FLEX, `flex_order.plan_flex`;
-  every contest has an entry once entries exist; salary sanity), grey when fine, amber only when wrong, and the **late window** (each
-  lineup's players in later games and what could still swap in). **Swap / Keep / Skip** on the served page (`/api/lock`,
+  him to record entries.** A four-line **pre-lock checklist** (card 3) (no inactive player; late-game players in FLEX, `flex_order.plan_flex`;
+  every contest has an entry once entries exist; salary sanity), grey when fine, amber only when wrong, and the **late window** (card 4; each
+  lineup's players in later games and what could still swap in). **Swap / Keep / Later** on the served page (`/api/lock`,
   `week_server.lock_answer`) records the choice in `data/week/decisions.jsonl` (`decisions_log.py`, append-only, ids `<season>-<week>-NNNN`,
   undos are lines of their own) and says the swap to make on DraftKings: **nothing writes a sheet, nothing blocks or warns.** Late
   swap's runs are append-only too: `late_swap_store.save` also appends each run to `data/cockpit/late_swaps.jsonl` with its top three

@@ -820,6 +820,7 @@ def wait_job(c, job_id, timeout=5):
     return job
 
 
+@pytest.mark.slow  # 0.3-0.4 s alone, but a job process and an SSE stream hit the 3 s guard under load
 def test_a_button_runs_a_command_and_streams_its_output(make):
     c = make()
     status, started = c.post("/api/jobs/start", {"command": "dfs sync --live", "values": {}})
