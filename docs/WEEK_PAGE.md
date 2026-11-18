@@ -5,18 +5,75 @@ part shows, the module behind it, the files it reads and the tests that cover it
 in `docs/WORKFLOW.md`; the exact math behind a number is in `docs/CALCULATIONS.md`. `CLAUDE.md` points here; the
 rules that are never broken (the served page's guards among them) stay in `CLAUDE.md`.
 
-Every part below was built in a named round (Plans I, J, K, K2, N, O, O2; blueprint Phases A-D); the names are kept
-in parentheses so a session can find the round's planning notes, but the page is described as it is now.
+Every part below was built in a named round (Plans I, J, K, K2, N, O, O2; blueprint Phases A-D; the design pass); the
+names are kept in parentheses so a session can find the round's planning notes, but the page is described as it is now.
+The design pass (PR #92, 2026-11-17; `docs/planning/audit/DESIGN_PASS_2026-11.md`) put one shell and one design system
+around the page: the shell and the Saturday view come first below; every older block is still on the page, on a
+More view and on Everything.
+
+## The shell: day views, status lines, This week, More (`week_shell.py`, `week_style.py`)
+
+- **The header** (sticky): the week, three **day views** (Saturday `#build`, Sunday `#lock`, Tuesday `#close`;
+  `week_shell.DAYS`), player search (`#psearch`, `/` focuses it) and **Ask Claude**. Every day view is reachable on any
+  day; the clock (`lock_state.state`) only picks the one that opens first, and carries the "now" dot. The last view is
+  kept per week and clock state (`dfs-view-<season>-<week>-<state>`), so Saturday's choice never hides Sunday's page.
+- **The chat starts folded on every load**, at every width: there is no rail, **Ask Claude** opens it, and nothing
+  remembers it open (`week_live`, the `chat-open` / `chat-closed` body classes).
+- **A status line per day** (`week_shell.status_lines`; Sam, 2026-11-17), grey, amber or green only for an outlier:
+  - Saturday (`saturday_facts`): Lock · Pool (by position) · Builds · News (the last day of the change log before a
+    build, `NEWS_WINDOW`; since the build after) · Entered;
+  - Sunday (`sunday_facts`): Lock · News since Saturday night · Lineups at risk · Swaps open · Entered;
+  - Tuesday (`tuesday_facts`): Week net · Cash x of y · Scorecards · Next.
+
+  An item that waits on a step says what it waits for: "not run yet" never takes a row.
+- **This week** (the side column, `this_week_html`, on the three day views and Everything): the six steps of the week
+  (`week_board.progress`) as a checklist, each step not done with its **Run** button (a command button on the served
+  page, the `dfs` line to copy on the static one), and the **file drop zone** below it. A step that has not run is
+  listed here, not in the body.
+- **More** (`week_shell.MORE`, `more_html`): one row of pills, each a view of its own (`#name`), so every section is
+  one click away while the day view leads: Board, Explorer, Games, Usage, Injuries, Model vs sources, Overview (the old
+  Saturday scan) | Builds, Game day, Ledger and plan, Last week, Season-long | Run a command, Everything. Where each
+  block shows: `week_views.PLACES` (the page's own blocks) and `week_views.FOLD_PLACES` (each older fold: its More view
+  and the day view that also shows it, e.g. the inactives check on Sunday and Game day).
+- **The design system** (`week_style.py`): tokens on `:root` with a dark mode, a type scale (11 chip, 12 meta, 13 dense,
+  14 body, 16 section title, 22 headline number; weights 400 and 600), spacing 4 / 8 / 12 / 16 / 24 / 32, and the
+  components new blocks are drawn with (header, status line, card and fold, table, player row, tag, trust chip,
+  candidate card, lineup card, checklist, More bar). Grey by default; the accent only for actions; good / warn / bad
+  only for outliers. The older blocks keep their class names: their variables (`--card`, `--dim`, ...) alias the tokens.
+- **The pool square** on every name: 22 px, left of the name, C / G / B, `+` on hover, smaller inside running text;
+  the same `dfsPool` store and popover as the pool chip below.
+
+## Saturday: the build view (`week_saturday.py`, pure; placed by `week_top`)
+
+- **Before a build, the slate digest leads** (`digest_html`, `#digest`): the games ranked by total with each team's
+  implied total, wind / dome and the line's move since the opening snapshot; the key injuries among likely starters,
+  with who gains, and the line moves (a spread move of `MOVE_SPREAD` points or more) in one list (`news_items`); then
+  the best plays, `BEST_PER_POS` (3) per position with one number each, the projection (the rest is in the drawer).
+- **After a build, "Chalk you're not on" leads** (`chalk_not_on` / `chalk_html`, `#chalk-off`): every player at 30%+
+  CashOwn (`week_page.CHALK_THRESHOLD`) who is not in his cash lineup and not OUT / IR, with projection, salary and
+  why, and the Play / Fade that used to sit in the decisions. His cash lineup (`your_cash_lineup`) is the Default when a
+  run saved one, else the newest round's first cash build, else the cash lineup he entered. Information only. Then
+  Phase A's cash board and open spots, the other decisions, and the digest folded.
+- **"Someone else…" on each open spot**: a search over Sam's pool, limited to players who fit the slot (his position;
+  RB / WR / TE for FLEX) and the salary (the Default's player's salary plus what the Default leaves), not already in
+  the Default, each shown as a difference against the Default's player (points, salary freed, cash own) before he picks
+  (`spot_options`, drawn by the client, `week_ui` `otherDraw`). A pick goes through `/api/decide` like a card: the
+  server checks the fit again (`fits_spot`; a player who does not fit is refused), writes the same `cash: Name` on
+  Always use, adds him to the pool as Cash, and only after the write succeeds remembers him as the spot's answer
+  (the `decisions` input, key `other:spot:<SLOT>`, `week_board.OTHER`); Undo takes it back.
+- **Fades** (`fades_html`, `#fades`, folded under the day's cards): FADE↓ with its Model Check record and the plays
+  model's AVOID in cash (Shadow, with its backtest and live record), one list; and **Your pool**, folded.
+- The cash board's Play / Fade column is no longer clipped at 1440 px.
 
 ## The page and its sections
 
 - `dfs week page [--week N] [--open/--no-open]` -- **the Week page** (v2): one self-contained HTML file,
   `data/week/<season>-wk<NN>.html` (inline CSS, an inline JSON block and script for the Explorer, no external loads), opened
-  in the browser. Top, in this order: the **status strip** of five tiles (the Lock state
-  below; `week_top.strip_html`; the six **progress steps**, Pool, Contest plan, Builds, Entries recorded, Late swap, Close, each
-  done / next / to do from the real state, `week_board.progress`, sit under the brief's next line and stand in for the strip only
-  when the clock's state cannot be read), **the brief** (5-7 deterministic, day-aware
-  sentences; `week_board.brief`) with the next step, the **pool panel** (Cash / GPP counts by position, gaps, Questionable
+  in the browser. Its blocks, each on a view of the shell above since the design pass (`week_views.PLACES` /
+  `FOLD_PLACES`): **the brief** (on Overview; 5-7 deterministic, day-aware sentences; `week_board.brief`) with the next step
+  and the six **progress steps** under it (Pool, Contest plan, Builds, Entries recorded, Late swap, Close, each done / next /
+  to do from the real state, `week_board.progress`; the same steps are This week's checklist), the **pool panel** (folded
+  under Saturday's cards) (Cash / GPP counts by position, gaps, Questionable
   in the pool, the top 5 the data likes that are not pooled), the **decisions** (30%+ CashOwn Play / Fade, a Questionable
   star's pivot or wait, the GPP stack between the top two QBs; `week_board.decisions`), **one board** (Plan I's plays,
   `week_plays.plays`, deduped: each player once with his role chips, top 3 per role and position plus Show more; FADE↓
@@ -40,16 +97,16 @@ in parentheses so a session can find the round's planning notes, but the page is
 
 - `dfs week serve [--week N] [--port P] [--no-open] [--sheet-id <id>] [--stop]` -- **the Week page as a local app** (`week_server.py`;
   the static `dfs week page` is unchanged): serves the page on this Mac only (`127.0.0.1`; the link it opens carries a
-  random token, and every request needs the token and a localhost `Host`), with **Claude Code docked on the right**
+  random token, and every request needs the token and a localhost `Host`), with **Claude Code beside it** (folded on every load until **Ask Claude** opens it)
   (`week_chat.py`: `claude -p` in stream-JSON mode in the main checkout under Sam's own login; model / effort / New chat /
   Stop / this week's chats; a call that needs approval shows on the page as Approve / Deny with exactly what will run,
   nothing is auto-approved, `bypassPermissions` is never used, "auto" is a switch he turns on; no background commands
   (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`), a turn is read until its process exits (it can print several `result`s;
   the answer is the first after Claude Code replays Sam's message), a turn with no answer ends in a red line; after any
-  chat change run `python scripts/chat_smoke.py`, three turns against real Claude, not in pytest), an **Ask** button
+  chat change run `python scripts/chat_smoke.py`, four turns against real Claude, not in pytest), an **Ask** button
   beside every phrase, **run buttons** for every command with live output (`week_jobs.py`: one job at a time, Stop, history;
   `week new` / `week close` / `lineups clear` / `pool clear` / `setup ...` need the command typed out; a closed week is
-  read only), a **check this contest** form and the **file drop zone** (`week_drops.py`: DK's entries file at lock, the
+  read only), and the **file drop zone** (in This week; the check-this-contest form left in Removal F7) (`week_drops.py`: DK's entries file at lock, the
   history export and standings at close; only .csv / .zip, size and zip-bomb limits, existing parsers only, filed into
   Downloads where `entries record` and `week close` look, never deleted; after a drop it shows what was recognised and
   offers the matching command). **The page's own writes** (`week_actions.py`
@@ -65,7 +122,7 @@ in parentheses so a session can find the round's planning notes, but the page is
 ## The client: one script on both pages
 
 - **Plan N on the Week page** (client side in `week_ui.py`: CSS and one script on the static and the served page; no
-  library, no network of its own): the chat folds to a tab (`dfs-chat-collapsed` in localStorage); one wide column
+  library, no network of its own): the chat starts folded on every load (the shell, above); one wide column
   (board, `.charts-row`, games, Explorer); sticky headers in each `.scroll` box (the board repeats `board_head` per
   position) and a sticky name column (`table.stickyname`); Opp / Spread / Total / Implied on every player grid; the
   page state (open folds, Show more, scroll) kept per week in localStorage and restored after `refreshSections`; ONE
@@ -75,7 +132,7 @@ in parentheses so a session can find the round's planning notes, but the page is
   queued (`dfsQueue`); decisions also move the pool (`week_actions.decide_pool`, `merge_pool`, `add_kind`,
   `drop_cash_only`; the pool half is kept under `pool:` keys in the `decisions` input so Undo reverses it); the chart
   viewer (`week_charts.viewer_data`, JSON `chart-data`); the game view (`week_top.game_data`, JSON `game-data`;
-  `/api/stack` = `week_actions.more_stack`, a Max exposure `more` line, needs a QB); the cash core's caps
+  its "Write as a Max exposure stack" button, `/api/stack`, left in Removal F7); the cash core's caps
   (`week_plays.CASH_CORE_CAP`, `cash_core`; 30%+ CashOwn = `Chalk core`, always shown); the chalk check's header and
   3 "close" rows (`week_page.CHALK_CHECK_HEADER`, `CLOSE_COUNT`); the consensus in DK's roster order
   (`consensus.dk_order`) with `week_money.CONSENSUS_CAPTION`; and `week_page.table(..., how=...)`: every table and
@@ -87,8 +144,8 @@ in parentheses so a session can find the round's planning notes, but the page is
 - **Plan O on the Week page** (O1): the **run panel** (`week_jobs.panel`: `WEEKLY`, the eight weekly buttons in the day's order, each
   form showing the options his shortcuts use (`Weekly.common`, short labels `SHORT_LABELS`, the help as a tooltip, `Weekly.defaults`
   filled in, the rest under "More options", a preview line of the exact command); every other command behind a search; `setup ...` /
-  `fix-...` behind a collapsed Advanced toggle (`is_advanced`); recent runs say ok / failed / stopped, how long and when, and open their
-  output (`data/week/jobs/<id>.log`, the newest `OUTPUT_KEPT`; `/api/jobs/output`)). **A pool chip on every name** (`week_ui` `decorate`:
+  `fix-...` behind a collapsed Advanced toggle (`is_advanced`); recent runs say ok / failed / stopped, how long and when (the per-run
+  output viewer, `/api/jobs/output`, left in Removal F7)). **A pool chip on every name** (drawn as the shell's pool square since the design pass; `week_ui` `decorate`:
   any `a.pl` the page draws, resolved to an id from the Explorer's data by name and team when a section holds only the name,
   `week_page.pn` / `pns`; a name not on this slate stays plain text; a row that already has the control gets none) and **one click to add**
   a player listed as missing from the pool (`week_page.add_button`, kind from `week_board.kind_of`). **Colour by position**
@@ -102,21 +159,21 @@ in parentheses so a session can find the round's planning notes, but the page is
 
 ## Views, search and compare
 
-- **Plan O2 on the Week page** (`week_views.py`): a **view bar** under the brief (`VIEWS`: Saturday (`build`, holds the Overview; `#overview`
-  is an alias) | Sunday (`lock`, blueprint C2) | Board & Explorer | Usage | Injuries | Model vs sources | Everything = every block; Sam,
-  2026-11-09; the page opens on the clock's state, `body[data-state]`), each view its own `#name` (a link or the back
-  button opens it; no element id may equal one, a test checks), the last one kept per week (`dfs-view-<season>-<week>`); every block is
-  wrapped in `week_views.wrap(html, place)` naming its views (`PLACES`); the strip and the brief show on all of them, and the
-  one pool store serves every view. **Overview**: one row per position (top value, cash core and chalk, the board's Upside, the fades:
+- **Plan O2 on the Week page** (`week_views.py`): the views (`VIEWS`: the three day
+  views and More's pills, see the shell above; the page opens on the clock's state, `body[data-state]`), each view its own `#name` (a link or the back
+  button opens it; no element id may equal one, a test checks), the last one kept per week and state; every block is
+  wrapped in `week_views.wrap(html, place)` naming its views (`PLACES`); the header shows on all of them, and the
+  one pool store serves every view. **Overview** (a More view since the design pass, the old Saturday scan): one row per position (top value, cash core and chalk, the board's Upside, the fades:
   FADE↓ plus the plays model's AVOID / FADE (Shadow) on one line per name, the top injury fallout = the calls' teammate bump), the top
-  3 games, the pool by position; the day's folds, the run panel and the tools sit under it. **Usage**: `data/current/usage_weeks.csv`
+  3 games, the pool by position (the run panel is its own More view, Run a command). **Usage**: `data/current/usage_weeks.csv`
   and `team_weeks.csv` (new sheetless sources `usage_weeks` / `team_weeks`, `sources/usage_weeks.py`, math `usage_weeks.py`; a full
   `dfs sync` only, never `--live`): per game snap share, targets, target / air-yards share, WOPR, RZ / HVT, carries, DK points; per
   team-game plays, dropback rate, PROE, pace, red-zone trips; drawn by the client (window, trend metric with a last-5 sparkline against
   the season mean, two scatters per position with the outliers labelled, a stacked bar of each team's targets and carries).
   **Injuries**: per slate team, DK's OUT / D / Q / IR plus the injury report's designations, the practice trend, who benefits (the calls'
   `bump` / `bump_from`). **Model vs sources**: CalPts against TFFB / Sleeper / FantasyPros / ESPN / props (the median of 2+ sources),
-  the biggest disagreements by position, every player behind a fold, and the plays calls leading with AVOID and FADE, each label's record
+  the biggest disagreements by position, every player behind a fold, and the plays calls' AVOID and FADE (the CORE / PLAY / TARGET / LEVERAGE block, "Who to play", left in
+  Removal F8), each label's record
   kept apart: the M1 backtest (newest `docs/research/plays/*-plays-summary.json`, gitignored) and the live `calls_history.csv`
   (`week_inputs.calls_record`, `week_views.record_of`). **Search** (`#psearch`, `/` focuses it) and a **compare tray** of 2-4 players
   (`+ Compare` in the search, the drawer and every pool chip's popover; kept per week) with the compare rows and directions
@@ -171,8 +228,9 @@ in parentheses so a session can find the round's planning notes, but the page is
 
 - **The Lock state** (blueprint Phase C2; `lock_state.py` pure, `week_views.lock_section`, `week_top.strip_html`): the Week page knows
   the clock (`lock_state.state`: `lock` from 13 hours before the main slate's first kickoff until 3.5 hours after its last, `close`
-  after or on a closed week, `build` otherwise) and opens on it (`close` opens the Close view, Phase D below); a **status strip** of five tiles (time to lock, entered vs planned, open decisions, news pending,
-  lineup health) replaces the progress steps at the top (the steps moved into the brief). The **Sunday view** (`#lock`): **what changed
+  after or on a closed week, `build` otherwise) and opens on it (`close` opens the Close view, Phase D below); five **tiles** (time to lock, entered vs planned, open decisions, news pending, lineup health;
+  drawn as a strip at the top until the design pass, now feeding the Sunday status line, `week_shell.sunday_facts`;
+  `week_top.strip_html` is no longer drawn). The **Sunday view** (`#lock`): **what changed
   since the build his lineups came from** (`lock_state.baseline`: the newest suggest round the Lineups-tab lineups match, 8+ of 9,
   else the latest round, else Saturday 9 pm ET; Sam, 2026-11-17), from `data/news/changes.csv` netted per player and field
   (`net_changes`), one row per player (status > projection > ownership), only rows touching a lineup or the pool, a status row

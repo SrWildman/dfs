@@ -503,7 +503,7 @@ find are listed in `data/results/unmatched_<season>_wNN.csv` (mostly backups who
 
 ## The Week page as an app: `dfs week serve`
 
-`dfs week serve` opens the Week page on this Mac only, with Claude Code docked on its right. Ask in the chat instead of
+`dfs week serve` opens the Week page on this Mac only, with Claude Code beside it, folded until you press **Ask Claude**. Ask in the chat instead of
 switching to a terminal (the **Ask** buttons put a step's phrase in the box); a call that needs approval appears in the
 chat as Approve / Deny with exactly what will run. The **Run** card has a button for every command, with live output, a
 Stop button and a history; `week new`, `week close`, `lineups clear`, `pool clear` and every `setup ...` need the command
