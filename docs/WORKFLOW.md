@@ -393,12 +393,24 @@ dfs week close --research
 `--monthly`) it also runs the monthly studies after them (research refresh, the stacks retro, the plays model's calls and their
 Flashback bans; under 45 minutes). Leave it off for a close on its own.
 
-**Tuesday: the Week page's Close view.** After the close the Week page opens on **Tuesday** (`#close`): one line for the week (your
-double-up points against the cash lines, how many cashed, the share of the field you beat, the week's net), what decided it (the five
-players who most separated cashers from the rest, each tagged you had him / a choice / variance), you against the build, the four
-scorecards (projection, ownership, calibration, edge at lock: Proven / Not proven / Overstated / New), the ledger, four tiles and the
-one thing worth changing (usually nothing). The decision log at the bottom lists every decision the page recorded; on the served
-page one tap gives each a reason. Information only: nothing on it blocks, warns or writes a sheet.
+**Tuesday: the Week page's Close view.** After the close the Week page opens on **Tuesday** (`#close`; Saturday and Sunday stay
+one click away). The status line reads Week net · Cash (x of y double-ups) · Scorecards · Next. Then, in order:
+
+1. **The week, closed**: one sentence (your double-up points against the cash lines, how many cashed, the share of the field you
+   beat, the week's net) with **the one thing worth changing** (usually nothing) directly under it.
+2. **What decided it**: the five players who most separated cashers from the rest, their cash ownership predicted → actual, each
+   tagged you had him / a choice / variance.
+3. **You against the nearest build**: this week and the season ("too few to call" under 12 weeks).
+4. **Scorecards**: the four tiles (edge at lock on paper, avoidable errors, calibration gap, cash percentile), then the four models
+   (projection, ownership, calibration, edge at lock: Proven / Not proven / Overstated / New).
+5. **The ledger** and 6. **the decision log**, each folded to one line; on the served page one tap gives a decision its reason.
+
+The side adds **Next**: say "start week N" with the new sheet's URL. Information only: nothing on it blocks, warns or writes a
+sheet.
+
+**The stale notice** (every day, under the header) is one line: the most urgent thing that is out of date and the one command that
+fixes it (`dfs sync`, `dfs lineups suggest --iterate`, `dfs lineups late-swap`, `dfs season sync`), "+N more" when there is
+more; click it for every sentence. Amber; grey when the only thing is a source that has not published yet.
 
 With no `--csv` it uses the newest history export in your Downloads folder (found by its header row, `[contests] downloads_dir` changes
 the folder) and says which file. `--csv <file>` still works.

@@ -1769,6 +1769,7 @@ def render(
         week_style,
         week_sunday,
         week_top,
+        week_tuesday,
         week_ui,
         week_views,
     )
@@ -1831,7 +1832,7 @@ def render(
         sources = sorted(inp.manifest)
         failed = [n for n in sources if inp.manifest[n].get("error")]
         pending = [n for n in sources if inp.manifest[n].get("pending") and n not in failed]
-        stale = week_today.stale_items(
+        stale = week_today.stale_notes(
             now=inp.now,
             manifest=inp.manifest,
             suggest_at=suggest_time(inp),
@@ -1885,8 +1886,10 @@ def render(
             + wrap(week_saturday.fades_html(inp, board, open_=False), "fades")
             + wrap(week_top.pool_panel_html(panel, live, source), "pool")
         )
-        side = wrap(week_top.cash_lineup_side(inp), "side-build") + wrap(
-            week_shell.this_week_html(steps, live) + LIVE_CONTEST, "side"
+        side = (
+            wrap(week_top.cash_lineup_side(inp), "side-build")
+            + wrap(week_shell.this_week_html(steps, live) + LIVE_CONTEST, "side")
+            + wrap(week_tuesday.next_html(inp), "close")
         )
         page = (
             "<!doctype html><html lang=en><head><meta charset=utf-8>"
@@ -1895,15 +1898,15 @@ def render(
             f"<title>Week {inp.week}, {inp.season}</title>"
             f"<style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}"
             f"{week_top.CASH_CSS}{week_money.LEDGER_CSS}{week_top.STRIP_CSS}{week_learn.CLOSE_CSS}"
-            f"{week_style.CSS}{week_sunday.CSS}</style>"
+            f"{week_style.CSS}{week_sunday.CSS}{week_tuesday.CSS}</style>"
             f'</head><body data-state="{e(st)}"><main>'
-            + week_shell.header_html(inp, st, live, sub, week_shell.stale_text(stale))
+            + week_shell.header_html(inp, st, live, sub, week_shell.stale_html(stale))
             + "".join(wrap(lines[k], f"status-{k}") for k in ("build", "lock", "close"))
             + '<div class="layout"><div class="mainc">'
             + saturday
             + wrap(week_sunday.sunday_html(inp, lv, live), "lock")  # the design pass's Sunday
             # blueprint Phase D: the closed week on one screen (the clock's `close` state opens it)
-            + wrap(week_learn.close_section(inp, live).html(), "close")
+            + wrap(week_tuesday.tuesday_html(inp, live), "close")  # the design pass's Tuesday
             + "".join(folds)
             + f'</div><aside class="side" aria-label="This week">{side}</aside></div>'
             + week_shell.more_html()

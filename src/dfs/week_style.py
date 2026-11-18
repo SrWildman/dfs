@@ -76,6 +76,12 @@ background:var(--surface);color:var(--ink);font:inherit}
 .wk-tools .askbtn{border-color:var(--line-2);border-radius:999px;padding:4px 12px}
 .wk-meta{font-size:12px;color:var(--ink-3);margin:6px 0 0}
 .wk-meta.warn{color:var(--warn)}
+details.stale summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:6px;min-width:0;
+white-space:nowrap}details.stale summary::-webkit-details-marker{display:none}
+details.stale .what{overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0}
+details.stale code.fix{font-size:11.5px;color:inherit;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}
+details.stale .more{color:var(--ink-3);text-decoration:underline;flex:none}
+details.stale ul{margin:4px 0 0;padding-left:18px;white-space:normal}details.stale li{margin:2px 0}
 .sline{display:flex;margin:12px 0 16px;background:var(--surface);border:1px solid var(--line);border-radius:10px;
 overflow-x:auto;scrollbar-width:none;padding:0}
 .sline::-webkit-scrollbar{display:none}

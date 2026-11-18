@@ -70,7 +70,7 @@ def header_html(inp: WeekInputs, clock_state: str, live: bool, meta: str, stale:
         '<div class="wk-tools"><span class="vsearch"><input id="psearch" type="search" placeholder="Find a player  /" '
         'autocomplete="off" aria-label="Find a player"><span id="psearch-list" class="srlist" hidden></span></span>'
         f"{ask}</div></header>"
-        f'<p class="sub wk-meta">{meta}</p>' + (f'<p class="wk-meta warn">{stale}</p>' if stale else "")
+        f'<p class="sub wk-meta">{meta}</p>' + stale
     )
 
 
@@ -266,8 +266,27 @@ def this_week_html(steps: list[wb.Step], live: bool) -> str:
     )
 
 
-def stale_text(items: list[str]) -> str:
-    return ("Stale: " + e("; ".join(items))) if items else ""
+def stale_html(notes: list) -> str:  # noqa: ANN001 - list[week_today.Stale]
+    """The stale notice as one line (Sam, 2026-11-18): the most urgent thing and the one command that fixes it,
+    "+N more" when there is more, the full sentences behind the click. Amber, unless all of it is a source
+    that has not published yet (nothing to fix: grey). Always a `section[id]`, so the served page's refresh
+    replaces it (and keeps it open if Sam opened it)."""
+    if not notes:
+        return '<section class="stalebox" id="stale-note"></section>'  # kept, so a live refresh can fill it
+    top = notes[0]
+    more = len(notes) - 1
+    tone = "warn" if any(n.fix for n in notes) else ""
+    fix = f' <code class="fix">{e(top.fix)}</code>' if top.fix else ""
+    full = "".join(
+        f"<li>{e(n.text)}" + (f" Fix: <code>{e(n.fix)}</code>" if n.fix else "") + "</li>" for n in notes
+    )
+    return (
+        '<section class="stalebox" id="stale-note">'
+        f'<details class="wk-meta stale {tone}"><summary title="{e(" ".join(n.text for n in notes))}">'
+        f'<span class="what">{e(top.short)}</span>{fix}'
+        f'<span class="more">{f"+{more} more" if more else "why"}</span></summary>'
+        f"<ul>{full}</ul></details></section>"
+    )
 
 
 def since_build(inp: WeekInputs):  # noqa: ANN201 - datetime | None

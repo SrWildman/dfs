@@ -245,7 +245,21 @@ def launcher_state(
     return state
 
 
-def stale_items(
+@dataclass(frozen=True)
+class Stale:
+    """One thing that is out of date: `short` and `fix` (the one command that fixes it, "" when nothing does)
+    make the header's one line; `text` is the full sentence behind the click."""
+
+    short: str
+    fix: str
+    text: str
+
+
+def _names(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{len(names)} sources"
+
+
+def stale_notes(
     *,
     now: datetime,
     manifest: dict,
@@ -253,9 +267,10 @@ def stale_items(
     late_swap_at: datetime | None,
     season_at: datetime | None,
     day: int,
-) -> list[str]:
-    """What is out of date, each one sentence. Empty when everything the page reads is fresh."""
-    items = []
+) -> list[Stale]:
+    """What is out of date, most urgent first (a pending source, which nothing fixes, last). Empty when every
+    thing the page reads is fresh."""
+    notes: list[Stale] = []
     stamps = {}
     for name, v in manifest.items():
         try:
@@ -264,25 +279,67 @@ def stale_items(
             continue
     failed = sorted(n for n, v in manifest.items() if v.get("error"))
     pending = sorted(n for n, v in manifest.items() if v.get("pending") and not v.get("error"))
+    pend: list[Stale] = []
     if not manifest:
-        items.append("Nothing is synced: run `dfs sync` (the page has no data to read).")
+        notes.append(
+            Stale(
+                "Nothing synced",
+                "dfs sync",
+                "Nothing is synced: run `dfs sync` (the page has no data to read).",
+            )
+        )
     else:
         newest = max(stamps.values()) if stamps else None
-        if newest and now - newest > timedelta(hours=launcher.STALE_HOURS):
-            items.append(
-                f"Data is {ago(now, newest).replace(' ago', '')} old (last sync {when(now, newest)})."
-            )
         if failed:
-            items.append(f"Failed their last sync: {', '.join(failed)}.")
-        if pending:
-            items.append(f"Pending (not published yet, not a failure): {', '.join(pending)}.")
-        if suggest_at and newest and suggest_at < newest - timedelta(minutes=5):
-            items.append(
-                f"The builds on Suggested are from {when(now, suggest_at)}, before the last sync "
-                f"({when(now, newest)}): rebuild if the sync changed anything you care about."
+            notes.append(
+                Stale(
+                    f"Sync failed: {_names(failed)}",
+                    "dfs sync",
+                    f"Failed their last sync: {', '.join(failed)}.",
+                )
             )
-        if late_swap_at and newest and day == SUN and late_swap_at < newest - timedelta(minutes=5):
-            items.append(f"Late swap last ran {when(now, late_swap_at)}, before the last sync: run it again.")
+        if newest and now - newest > timedelta(hours=launcher.STALE_HOURS):
+            age = ago(now, newest).replace(" ago", "")
+            notes.append(
+                Stale(f"Data {age} old", "dfs sync", f"Data is {age} old (last sync {when(now, newest)}).")
+            )
+        late = late_swap_at and newest and day == SUN and late_swap_at < newest - timedelta(minutes=5)
+        if late:  # Sunday: the late swap ahead of the builds
+            notes.append(
+                Stale(
+                    "Stale late swap",
+                    "dfs lineups late-swap",
+                    f"Late swap last ran {when(now, late_swap_at)}, before the last sync: run it again.",
+                )
+            )
+        if suggest_at and newest and suggest_at < newest - timedelta(minutes=5):
+            notes.append(
+                Stale(
+                    "Stale builds",
+                    "dfs lineups suggest --iterate",
+                    f"The builds on Suggested are from {when(now, suggest_at)}, before the last sync "
+                    f"({when(now, newest)}): rebuild if the sync changed anything you care about.",
+                )
+            )
+        if pending:
+            pend.append(
+                Stale(
+                    f"{_names(pending)} pending",
+                    "",
+                    f"Pending (not published yet, not a failure): {', '.join(pending)}.",
+                )
+            )
     if season_at and now - season_at > timedelta(days=4):
-        items.append(f"The season-long view is from {when(now, season_at)}: `season sync` refreshes it.")
-    return items
+        notes.append(
+            Stale(
+                f"Season-long {ago(now, season_at).replace(' ago', '')} old",
+                "dfs season sync",
+                f"The season-long view is from {when(now, season_at)}: `season sync` refreshes it.",
+            )
+        )
+    return notes + pend
+
+
+def stale_items(**kw) -> list[str]:  # noqa: ANN003 - the keywords of `stale_notes`
+    """What is out of date, each one sentence. Empty when everything the page reads is fresh."""
+    return [n.text for n in stale_notes(**kw)]

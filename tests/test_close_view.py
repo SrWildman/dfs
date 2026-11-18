@@ -320,7 +320,12 @@ def test_the_decision_log_lists_the_weeks_decisions_with_reason_pills(tmp_path):
     ]
     static = render(inputs(tmp_path, slate_rows(), now=TUE, close=close_input(), decisions_log=log))
     block = close_block(static)
-    assert "Decision log (1)" in block and "Denzel Boston" in block and "(was Ryan Flournoy)" in block
+    assert (
+        "Decision log" in block
+        and "1 decision this week" in block
+        and "Denzel Boston" in block
+        and "(was Ryan Flournoy)" in block
+    )
     assert 'class="on" data-id="2026-09-0001" data-reason="news" disabled' in block  # the static page reads
     assert len(re.findall(r'data-reason="', block)) == len(week_learn.REASON_LABELS)
 
