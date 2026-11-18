@@ -5,7 +5,7 @@ with the exact phrase to say to Claude Code and the command, and what is stale. 
 in a week, answered from what the tool has already saved, each with its **trust** (Proven / Shadow / Untested;
 the outside audit's verdicts, `TRUST`, are the starting point): the contest plan, cash, GPP, the unknowns,
 Sunday, the season-long leagues, last week. Last: **Your tools**, the anti-forgetting list, generated from the
-CLI's own registry and CLAUDE.md's phrase tables (`week_tools.py`), with when each was last run.
+CLI's own registry and docs/SHORTCUTS.md's phrase tables (`week_tools.py`), with when each was last run.
 
 Read-only. No sheet, no network, no server, no runner: a section whose input does not exist says "not run
 yet" and what to say to produce it. The file is `data/week/<season>-wk<NN>.html` (inline CSS, no external
@@ -1199,8 +1199,8 @@ def tools_html(inp: WeekInputs, tools: list[week_tools.Tool]) -> str:
             groups.append(f"<h4>{e(group)}</h4>{body}")
     return (
         '<section class="card" id="tools"><div class="card-head"><h2>Your tools</h2></div>'
-        '<p class="note">Generated from the CLI and CLAUDE.md, so it lists every command and every phrase, '
-        "including the ones you have not used lately.</p>" + banner + "".join(groups) + "</section>"
+        '<p class="note">Generated from the CLI and docs/SHORTCUTS.md, so it lists every command and every '
+        "phrase, including the ones you have not used lately.</p>" + banner + "".join(groups) + "</section>"
     )
 
 

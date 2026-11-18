@@ -523,11 +523,11 @@ def test_every_phrase_on_the_page_is_one_claude_code_knows_and_every_command_exi
     for day, specs in week_today.PLANS.items():
         for spec in specs:
             if spec.phrase:
-                assert spec.phrase in says, f"{spec.phrase!r} (day {day}) is not in CLAUDE.md's tables"
+                assert spec.phrase in says, f"{spec.phrase!r} (day {day}) is not in docs/SHORTCUTS.md"
             if spec.command and not spec.planned:
                 assert week_tools.command_path(spec.command) in registered, spec.command
             if spec.planned:
-                assert spec.phrase is None  # D's commands get their phrases in CLAUDE.md when they land
+                assert spec.phrase is None  # D's commands get phrases in docs/SHORTCUTS.md when they land
 
 
 def test_the_progress_strip_and_the_next_step_come_from_the_real_state(full):

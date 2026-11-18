@@ -1,12 +1,12 @@
 """The Week page's "Today": what day it is in Sam's week, the 3-5 steps for it, and what is stale. Pure
 (no files, no network) so it is directly testable; `week_inputs.gather` collects the facts it reads.
 
-The week, as Sam runs it (HANDOFF section 1, CLAUDE.md's shortcut table): Monday close, Tuesday new week,
+The week, as Sam runs it (HANDOFF section 1, docs/SHORTCUTS.md): Monday close, Tuesday new week,
 Wednesday-Friday research, Saturday build, Sunday game day. The state-driven part is not reinvented: the
 launcher's own `suggest_actions` (the one place that guesses what to do next from the data) is shown beside
 the day's plan, built from the same local facts it reads for the guided menu (no sheet).
 
-Each step carries the exact phrase to say to Claude Code (verbatim from CLAUDE.md's table; a test checks it)
+Each step carries the exact phrase to say to Claude Code (verbatim from docs/SHORTCUTS.md; a test checks it)
 and the command it runs. A step whose command does not exist yet (Plan D's `dfs contests plan` and `dfs
 entries record`) is left out until the command is registered, so the page never names a command that fails.
 """
@@ -35,7 +35,7 @@ MAX_STEPS = 5
 
 @dataclass(frozen=True)
 class StepSpec:
-    phrase: str | None  # what to say to Claude Code (verbatim from CLAUDE.md), None for a manual step
+    phrase: str | None  # what to say to Claude Code (verbatim from docs/SHORTCUTS.md), None for a manual step
     command: str | None  # the command it runs, as typed (`dfs sync --live`); None: by hand or in the sheet
     why: str
     planned: bool = False  # the command is Plan D's: shown only once it is registered

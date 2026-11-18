@@ -201,14 +201,14 @@ def test_iterate_on_suggested_is_a_four_line_box_that_names_the_decisions_the_ru
 
 
 def _shortcut_commands() -> set[str]:
-    """Every registered command CLAUDE.md's weekly-shortcuts table has Sam run (the "Run, in order" column
+    """Every registered command docs/SHORTCUTS.md's weekly table has Sam run (the "Run, in order" column
     of the DFS table; the season-long table belongs to the Season sheet, which has its own docs)."""
     from pathlib import Path
 
     from dfs import commands_doc
 
     registered = set(commands_doc.all_commands()) | {"dfs week serve"}
-    text = (Path(__file__).resolve().parents[1] / "CLAUDE.md").read_text()
+    text = (Path(__file__).resolve().parents[1] / "docs" / "SHORTCUTS.md").read_text()
     start = text.index("## Sam's weekly shortcuts")
     end = text.index("Season-long shortcuts", start)
     found: set[str] = set()
@@ -226,7 +226,7 @@ def _shortcut_commands() -> set[str]:
     return found
 
 
-def test_every_command_with_a_claude_md_shortcut_is_in_the_instructions_text():
+def test_every_command_with_a_shortcut_is_in_the_instructions_text():
     """So the tab cannot drift from the shortcuts again: a command Sam is told to run (or told that Claude
     runs for him) has to be findable on the Instructions tab, written out as `dfs <command>`."""
     commands = _shortcut_commands()
@@ -234,5 +234,5 @@ def test_every_command_with_a_claude_md_shortcut_is_in_the_instructions_text():
     text = _text()
     missing = sorted(c for c in commands if c not in text)
     assert not missing, (
-        f"CLAUDE.md has shortcuts for these but the Instructions tab never names them: {missing}"
+        f"docs/SHORTCUTS.md has shortcuts for these but the Instructions tab never names them: {missing}"
     )

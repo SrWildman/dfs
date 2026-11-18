@@ -145,7 +145,7 @@ class MenuItem:
 
 
 # Sam's week, in order (Week 6: the main menu is these steps and nothing else; every other command is under
-# "More, by topic"). The same steps as docs/COMMANDS.md's "Your standard week" and CLAUDE.md's shortcuts.
+# "More, by topic"). The same steps as docs/COMMANDS.md's "Your standard week" and docs/SHORTCUTS.md.
 STANDARD_WEEK_ITEMS = [
     MenuItem("Start a new week", "dfs week new"),
     MenuItem("Sync all data", "dfs sync"),
