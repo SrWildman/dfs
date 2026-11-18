@@ -1665,7 +1665,7 @@ def unknowns_into_sunday(sunday: Section, unknowns: Section) -> Section:
 
 
 def player_log(inp: WeekInputs) -> dict[str, list[dict]]:
-    """Each player's last five games (`data/current/player_log.csv`, the Player card's), by DK Id."""
+    """Each player's last five games (`data/current/player_log.csv`), by DK Id."""
     from dfs.week_inputs import _read_csv
 
     rows = _read_csv(inp.data_dir / "current" / "player_log.csv")
@@ -1685,11 +1685,71 @@ def player_log(inp: WeekInputs) -> dict[str, list[dict]]:
                 "Snap": num(g.get("Snap%")),
                 "Tgt": None if num(g.get("Tgt")) is None else round(num(g.get("Tgt")) or 0),
                 "Car": None if num(g.get("Car")) is None else round(num(g.get("Car")) or 0),
+                "TgtShare": num(g.get("Tgt%")),
+                "RZ": None if num(g.get("RZ")) is None else round(num(g.get("RZ")) or 0),
+                "In5": None if num(g.get("In5")) is None else round(num(g.get("In5")) or 0),
                 "DK": num(g.get("DK")),
             }
             for g in games
         ]
     return out
+
+
+MAX_PROP_LINES = 8
+
+
+def prop_lines(inp: WeekInputs) -> tuple[dict[str, list[dict]], str]:
+    """Each player's prop lines from the newest saved Odds API pull FOR THIS WEEK (`data/raw/odds_props/`),
+    by DK Id: `{"m": market, "line": the median line (None for a TD), "p": the de-vigged Over / Yes
+    probability, median across books, "books": n}`, and a note saying which pull. A pull from another week is
+    never shown as this week's. Fail-soft: `({}, note)`."""
+    import pandas as pd
+
+    from dfs import props
+    from dfs.sources import odds_props
+
+    try:
+        pulls = [
+            (at, p)
+            for at, p in odds_props.load_pulls(inp.data_dir / "raw" / odds_props.RAW_DIR_NAME)
+            if p.get("week") == inp.week
+        ]
+        if not pulls or not inp.edge:
+            return {}, f"No props pulled for week {inp.week} yet."
+        stamp, payload = pulls[-1]
+        quotes = props.parse_event_odds(payload.get("events", []), odds_format="american")
+        if quotes.empty:
+            return {}, f"The week {inp.week} props pull had no player lines."
+        consensus = props.consensus_lines(props.book_probabilities(quotes))
+        players = pd.DataFrame(
+            [{"Name": r.get("Name"), "Team": r.get("Team"), "Position": r.get("Position")} for r in inp.edge]
+        )
+        matched, _unmatched = props.attach_players(consensus, players)
+    except Exception as exc:  # noqa: BLE001 - the drawer's props block must never stop the page
+        return {}, f"Props could not be read ({exc})."
+    if matched.empty:
+        return {}, f"The week {inp.week} props pull matched no player on this slate."
+    ids = {(str(r.get("Name")), str(r.get("Team"))): str(r["Id"]) for r in inp.edge if r.get("Id")}
+    order = list(props.MARKET_LABELS)
+    out: dict[str, list[dict]] = {}
+    matched = matched.assign(_o=matched["stat"].map(lambda s: order.index(s) if s in order else 99))
+    for item in matched.sort_values("_o").itertuples(index=False):
+        pid = ids.get((str(item.Name), str(item.Team)))
+        if pid is None or len(out.get(pid, [])) >= MAX_PROP_LINES:
+            continue
+        out.setdefault(pid, []).append(
+            {
+                "m": props.MARKET_LABELS.get(item.stat, item.stat),
+                "line": None if pd.isna(item.line) else round(float(item.line), 1),
+                "p": round(float(item.p), 3),
+                "books": int(item.n_books),
+            }
+        )
+    note = (
+        f"Week {inp.week} pull of {stamp:%a %b %d %H:%M} UTC (one pull, not live): the market's own line and "
+        "its probability with the margin removed, median across books."
+    )
+    return out, note
 
 
 def record_lines(inp: WeekInputs) -> dict[str, str]:
@@ -1806,6 +1866,7 @@ def render(
             by_id,
             record_lines=record_lines(inp),
             log=player_log(inp),
+            prop_lines=prop_lines(inp),
             practice=week_money.practice_by_id(inp),
             asof=("Data " + sync_stamp(inp) + ".") if sync_stamp(inp) else "",
         )

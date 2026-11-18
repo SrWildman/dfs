@@ -151,6 +151,18 @@ QB_INT_LEAGUE_RATE = 0.7362
 INT_RATE_SHRINK_GAMES = 4
 
 
+# A market's name for people (the Week page's drawer).
+MARKET_LABELS = {
+    "pass_yd": "Passing yards",
+    "pass_td": "Passing TDs",
+    "pass_int": "Interceptions",
+    "rush_yd": "Rushing yards",
+    "rec": "Receptions",
+    "rec_yd": "Receiving yards",
+    "td": "Anytime TD",
+}
+
+
 def dispersion(position: str, stat: str) -> float:
     """phi (variance / mean) for a stat at a position; the pooled value for a position we did not fit."""
     return DISPERSION.get((position, stat), DISPERSION_POOLED.get(stat, 1.0))

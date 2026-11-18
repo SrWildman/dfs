@@ -158,15 +158,11 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   and never fail over it); `late-swap` saves its run to `data/cockpit/late_swap.json` for it (`late_swap_store`). Template first, then live,
   `dfs doctor` after (check `cockpit-tab`). `dfs week new` rebuilds it on the new sheet after the sync
   (fail-soft, only if the copied template has the tab) so the template's stale render never survives. Layout: `cockpit.py` (pure), I/O: `sheet_cockpit.py`.
-- `dfs setup player-card [--sheet-id <id>]` -- creates (or rebuilds) the **Player** tab right after Edge Finder: pick a name in `B1` (the only typed cell, a dropdown over EdgeRaw's names)
-  and read one player on one page (projections side by side, ownership, last five games of usage, matchup, props, signals with Model Check's record, his place in your lineups). Formulas over
-  EdgeRaw (columns from `derived.edge_sheet_letter`) plus two hidden raw tabs, `PlayerCardRaw` / `PlayerCardRows`, that every `dfs sync` rewrites **only on a sheet that already has the tab** (never
-  fails the sync; it also rebuilds the card itself when the sync changed EdgeRaw's width). Template first, then live, `dfs doctor` after (checks `player-card-*`, including `player-card-refs`: every EdgeRaw reference on the card is the column `derived.edge_sheet_letter` gives). Layout and spec: `player_card.py` (pure; one `Field` spec drives formula and text), I/O: `sheet_player_card.py`,
-  data: `sources/player_log.py`. A rebuild keeps the name in `B1`.
-- `dfs setup compare [--sheet-id <id>]` -- creates (or rebuilds) the **Compare** tab right after Player: four pickers in `B1:E1` (the only typed cells, dropdowns over EdgeRaw's names) and the Player card's
-  measures one column per player (header, projections, ownership, usage, opportunity per dollar, matchup and game, your lineups); the best value per row is green (lowest for Bust% and OppPosRank; no shade on salary or ownership, whose better side
-  depends on cash vs GPP, nor anywhere there is no clear direction). Formulas over EdgeRaw only (reuses the card's `Field` specs, so nothing is forked); a sync that **widens EdgeRaw rebuilds it** (only on a sheet that has the tab).
-  Template first, then live, `dfs doctor` after (checks `compare-*`, including `compare-refs`). Layout and rules: `compare_card.py` (pure), I/O: `sheet_compare.py`. A rebuild keeps the four names.
+- **One player in full** (the sheet's Player and Compare tabs were removed in batch F9, 2026-11-17; `dfs doctor` flags
+  either tab, or `PlayerCardRaw` / `PlayerCardRows`, as `retired-tab` until it is deleted by hand): the Week page's player drawer
+  (every source's projection, ownership, the last five games game by game from `data/current/player_log.csv`, written by the
+  sheetless `player_log` source (`sources/player_log.py`), this week's prop lines by market (`week_page.prop_lines`), the signals
+  with their record), the compare tray (`week_compare.SECTIONS`), the Explorer's All columns lens, and EdgeRaw itself.
 - `dfs stacks [--sheet-id <id>] [--no-sheet] [--refit] [--retro]` -- ranks every QB's stacks of one and two teammates (WR/TE, or a RB
   whose `Tgt%` is in the top third of the slate's RB1/RB2; with and without a bring-back) by simulated Top 1% rate against how much of the
   generated GPP field plays them, and writes the read-only **Stacks** tab (right after Suggested; top 20 stacks, top 8 games, the retro's
@@ -302,7 +298,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `week_page.pn` / `pns`; a name not on this slate stays plain text; a row that already has the control gets none) and **one click to add**
   a player listed as missing from the pool (`week_page.add_button`, kind from `week_board.kind_of`). **Colour by position**
   (`week_shade.py`: a z-score within the position in every table that has one, the sheet's palette, ownership orange, the top / bottom 10%
-  bold, a legend above each coloured table; directions from `compare_card.SECTIONS`). **Captions** (`week_page.caption` / `fill_asof`:
+  bold, a legend above each coloured table; directions from `week_compare.SECTIONS`). **Captions** (`week_page.caption` / `fill_asof`:
   every `table()` and chart shows how it is built, the source columns and the date of its data; `week_charts.FORMULA` / `SOURCES`).
   **The Explorer's chart follows the lens and the filters** (`week_explorer.LENS_CHARTS`, one per lens; the full-screen viewer opens the
   chart that is showing). The game view maps nflverse's team codes to DK's (`player_join.TEAM_ALIASES`: LA = LAR), has Previous / Next and a
@@ -325,8 +321,8 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   the biggest disagreements by position, every player behind a fold, and the plays calls leading with AVOID and FADE, each label's record
   kept apart: the M1 backtest (newest `docs/research/plays/*-plays-summary.json`, gitignored) and the live `calls_history.csv`
   (`week_inputs.calls_record`, `week_views.record_of`). **Search** (`#psearch`, `/` focuses it) and a **compare tray** of 2-4 players
-  (`+ Compare` in the search, the drawer and every pool chip's popover; kept per week) with the Compare tab's rows and directions
-  (`week_views.compare_spec` over `compare_card.SECTIONS`), usage trends and ownership. The served page fires `dfs-sections` after a
+  (`+ Compare` in the search, the drawer and every pool chip's popover; kept per week) with the compare rows and directions
+  (`week_views.compare_spec` over `week_compare.SECTIONS`), usage trends and ownership. The served page fires `dfs-sections` after a
   refresh (`week_live`) so the client-drawn views redraw. The pool store numbers each read-back and a render adopts a cell only when no
   newer read-back exists (`week_ui` `stale` / `mark`; a refresh asked for during one runs once more after it), and a `+ Cash` is
   resolved against the last read-back when its write runs (`requestPool` change `{id, add}`), never at the click.

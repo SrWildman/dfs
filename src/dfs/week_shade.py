@@ -11,9 +11,9 @@ the way the sheet's Edge Finder and Board colour a position block.
   distance, full at 2 standard deviations.
 - **The top and bottom 10%** of his position in the table are bold with a full-strength colour (for
   ownership only the top 10%).
-- **What a column means** comes from `compare_card.SECTIONS` (which way is better, per EdgeRaw column: the
-  Compare tab's own rule, so the page and the sheet cannot disagree), the ownership columns, and the page's
-  own short headers (`PAGE_HEADERS`). Salary, spread, kickoff and text are never coloured (`compare_card`
+- **What a column means** comes from `week_compare.SECTIONS` (which way is better, per EdgeRaw column: the
+  compare tray's own rule, so the tray and the tables cannot disagree), the ownership columns, and the page's
+  own short headers (`PAGE_HEADERS`). Salary, spread, kickoff and text are never coloured (`week_compare`
   gives them no direction).
 - A legend (`LEGEND`) sits right above every coloured table.
 
@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import json
 
-from dfs import compare_card as cc
 from dfs import sheet_color_scales as scs
+from dfs import week_compare as cc
 
 GOOD, BAD, OWN, DIFF = "good", "bad", "own", "diff"
 OWN_COLUMNS = ("Own%", "CashOwn", "GppOwn", "OurOwn")
@@ -75,11 +75,11 @@ def kinds() -> dict[str, str]:
     out: dict[str, str] = {}
     for _title, rows in cc.SECTIONS:
         for r in rows:
-            if r.better is None or r.spec.source != "edge":
+            if r.better is None or not r.edge:
                 continue
             kind = GOOD if r.better == cc.HIGH else BAD
-            out[r.spec.column] = kind
-            out.setdefault(week_explorer.HEADER.get(r.spec.column, r.spec.column), kind)
+            out[r.column] = kind
+            out.setdefault(week_explorer.HEADER.get(r.column, r.column), kind)
     for c in OWN_COLUMNS:
         out[c] = OWN
         out[week_explorer.HEADER.get(c, c)] = OWN

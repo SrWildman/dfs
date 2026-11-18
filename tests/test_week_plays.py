@@ -660,3 +660,13 @@ def test_chalk_core_shows_on_the_board_as_its_own_chip_never_behind_show_more(tm
     assert week_plays.CASH_CORE_RULE in html.unescape(section(page, "board"))
     assert "narrows during the week only as the news and the ownership move" in week_plays.CASH_CORE_RULE
     assert week_top.ROLE_CLASS[week_board.CHALK_CORE] == "chalk"
+
+
+def test_signal_tokens_map_to_their_model_check_row():
+    from dfs.week_plays import signal_group
+
+    assert signal_group("USAGE↑") == "USAGE↑"
+    assert signal_group("INJ+") == "INJ+ confirmed"
+    assert signal_group("Proj ▼?").startswith("Proj ▼")
+    assert signal_group("Props ▲ +4.2").startswith("Props ▲")
+    assert signal_group("MOVE↑") is None

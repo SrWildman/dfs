@@ -2698,12 +2698,6 @@ WEEK_ORDER = [
     ("Board", "decide"),
     # Edge Finder (2026-10-07): right after Board. Written by the sync, nothing on it is typed.
     ("Edge Finder", "decide"),
-    # Player card (2026-10-21): pick a player in B1, see everything about him on one page. Formulas over
-    # EdgeRaw and two hidden raw tabs (`HIDE_TABS`); `dfs setup player-card` creates it, `dfs sync` feeds it.
-    ("Player", "decide"),
-    # Compare (2026-10-22): the Player card's measures for up to four players side by side (pickers B1:E1).
-    # Formulas over EdgeRaw only; `dfs setup compare` creates it, a sync that widens EdgeRaw rebuilds it.
-    ("Compare", "decide"),
     ("EdgeRaw", "decide"),
     ("Player Pool", "build"),
     # Suggested builds (Week 6): written by `dfs lineups suggest`; between the pool and the lineups you type.
@@ -2757,9 +2751,6 @@ HIDE_TABS = [
     "TeamMetricsRaw",
     # Round 5 item 6: static DST alias lookup (`sheet_names.NameAlias`).
     "NameAlias",
-    # Player card (2026-10-21): the card's raw data, written by `dfs sync` (`sheet_player_card.refresh_raw`).
-    "PlayerCardRaw",
-    "PlayerCardRows",
     "SoSQB",
     "SoSRB",
     "SoSWr",

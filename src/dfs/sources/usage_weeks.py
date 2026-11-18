@@ -17,11 +17,10 @@ import io
 import pandas as pd
 
 from dfs.log import get_logger
-from dfs.player_card import snap_log_frame
 from dfs.sources.base import Source, SyncContext
 from dfs.sources.nflverse_snaps import SNAP_COUNTS_URL_TEMPLATE
 from dfs.sources.nflverse_usage import PBP_URL_TEMPLATE, NflverseUsageFetchError, _download, _read_parquet
-from dfs.sources.player_log import _stats
+from dfs.sources.player_log import _stats, snap_log_frame
 from dfs.usage_weeks import PBP_COLUMNS, PLAYER_COLUMNS, TEAM_COLUMNS, player_weeks, team_weeks
 
 log = get_logger("sources.usage_weeks")

@@ -2771,10 +2771,9 @@ def test_the_cockpit_sits_right_before_the_board_in_the_decide_family():
     assert dict(WEEK_ORDER)["Cockpit"] == "decide"
 
 
-def test_the_player_card_sits_right_after_edge_finder_and_its_raw_tabs_are_hidden():
+def test_the_removed_player_and_compare_tabs_are_out_of_the_tab_order():
+    from dfs.doctor import RETIRED_TABS
     from dfs.sheet_style import HIDE_TABS, WEEK_ORDER
 
-    tabs = [tab for tab, _family in WEEK_ORDER]
-    assert tabs.index("Player") == tabs.index("Edge Finder") + 1
-    assert dict(WEEK_ORDER)["Player"] == "decide"
-    assert {"PlayerCardRaw", "PlayerCardRows"} <= set(HIDE_TABS)
+    tabs = {tab for tab, _family in WEEK_ORDER} | set(HIDE_TABS)
+    assert not tabs & set(RETIRED_TABS)  # removal F9: no setup step may recreate or reorder them

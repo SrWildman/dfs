@@ -74,7 +74,7 @@ SOURCES: dict[str, Source] = {
     "snaps": NflverseSnapsSource(),
     "pbp": NflversePbpSource(),
     "usage": NflverseUsageSource(),
-    # The Player card's last five games per player; reads the stats snapshot `usage` just saved.
+    # Each player's last five games (EdgeRaw's L5 columns, the page's drawer); reads `usage`'s stats snapshot.
     "player_log": PlayerLogSource(),
     # The Week page's usage view (Plan O item 6): every game per player and per team; no sheet tab.
     "usage_weeks": UsageWeeksSource(),

@@ -224,12 +224,12 @@ def update_results(
 
 
 def signal_table_path(season: int):
-    """Where the Model Check signal records are kept for the Player card (`player_card.record_line`)."""
+    """Where the Model Check signal records are kept for the Week page (`week_inputs.load_signal_table`)."""
     return results_loop.RESULTS_DIR / f"signal_table_{season}.csv"
 
 
 def _save_signal_table(table: pd.DataFrame, season: int) -> None:
-    """Keep the signal records so the Player card can quote them at every sync without rebuilding them
+    """Keep the signal records so the Week page can quote them at every render without rebuilding them
     (the R6 history takes minutes). A failed save never fails the update."""
     try:
         results_loop.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -237,7 +237,7 @@ def _save_signal_table(table: pd.DataFrame, season: int) -> None:
             signal_table_path(season), index=False
         )
     except OSError as e:
-        log.warning("signal records not saved for the Player card: %s", e)
+        log.warning("signal records not saved: %s", e)
 
 
 def opportunity_table_path(season: int):

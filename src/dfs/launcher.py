@@ -309,8 +309,6 @@ MORE_LABELS = {
     "dfs setup add-pool-control": "Add Player Pool's add-a-player row",
     "dfs setup dk-upload": "Build DK Upload's entries layout (Lineup dropdown, Suggested)",
     "dfs setup cockpit": "Create the read-only Cockpit tab (Sunday's last 90 minutes)",
-    "dfs setup player-card": "Create the Player tab (one page per player; pick a name in B1)",
-    "dfs setup compare": "Create the Compare tab (up to four players side by side; pick names in B1:E1)",
     "dfs stacks": "Rank the QB stacks against the field (the Stacks tab)",
     "dfs plays": "Who to play and avoid, cash and GPP, with one reason each (shadow)",
     "dfs setup stacks": "Create the read-only Stacks tab (the QB stack ranker)",

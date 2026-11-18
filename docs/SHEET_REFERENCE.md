@@ -637,39 +637,14 @@ cell by finding the nearest `Pool` header above it and the `Id` in that header r
 `derived.EDGE_COLUMNS` layout every time `build-views` runs (`sheet_views._rng`/`_col`): re-run it after any EdgeRaw column reorder. Pool-derived
 sections do the same against `sheet_columns.PLAYER_POOL_COLUMN_ORDER`. `style_board` also clears any stale format left by an earlier layout.
 
-### Player
+### Player and Compare (removed)
 
-One page per player, right after `Edge Finder` (`sheet_style.WEEK_ORDER`, family `decide`). **`B1` is the only typed cell**: a dropdown over EdgeRaw's Name column (it warns, never
-rejects, a name outside it); the tab has warning-only protection with `B1` carved out (`sheet_protection.protect_player_card`). Everything else is a formula. Two helper cells in row 1
-turn the name into EdgeRaw's row (`H1`, a `MATCH`) and his `NameKey` (`I1`); every field is an `INDEX` into an EdgeRaw column (the letter always from `derived.edge_sheet_letter`, so a
-column insert on EdgeRaw cannot leave it pointing at the wrong thing; `dfs doctor` checks the helpers) or into one of two hidden tabs `dfs sync` rewrites (`PlayerCardRaw`: one row per
-player, his last five games game by game; `PlayerCardRows`: his prop lines and signals, keyed `<NameKey>|prop|n` / `|sig|n`). EdgeRaw is the one place for every per-player NUMBER (2026-10-21): the card reads Sleeper's and FantasyPros' projections, the kickoff, the last-five averages and the opportunity measures
-from EdgeRaw columns like any other field, and the hidden tab keeps only the per-game rows. **Created by
-`dfs setup player-card`** (template first, then the live week; `dfs doctor` after); **refreshed** by every `dfs sync` that runs the edge step, only on a sheet that has the tab, and a
-failed refresh prints a yellow line and never fails the sync.
-
-Blocks, top to bottom: **PLAYER** (team, position, salary, opponent, kickoff, status, flags); **PROJECTIONS** (TFFB, Sleeper, FantasyPros, ESPN, Props, AggPts, CalPts side by side, then Hit3x% / Boom% /
-Bust% / floor / ceilings, then Val, ValAdj, CeilVal, xFP/G; ESPN and Props are shadow sources, not in CalPts); **OWNERSHIP** (TFFB `Own%`, and `GppOwn` / `CashOwn` / `OurOwn`, labelled shadow: models, not published numbers);
-**USAGE, LAST 5 GAMES** (snap share, targets, carries, target share, red-zone looks, looks inside the 5 and DK points for his last five games PLAYED, with an average row that reads EdgeRaw's `Snap% L5` / `Tgt L5` / `Car L5` / `DK L5`; QBs show no target share); **OPPORTUNITY PER DOLLAR** (`TPRR~` proxy, xFP per game, its trend, xFP / targets / high-value touches per $1k and `PriceGap`, with a note that TPRR~ is a proxy);
-**MATCHUP AND GAME** (total, spread, implied total = (total - spread) / 2, GameEnv, pace, PROE, Expl%, OppPosRank, OppEPA, stadium, roof, wind); **PROPS** (the newest saved pull FOR THIS WEEK, one line per market with
-the de-vigged Over/Yes probability and the number of books; another week's pull is never shown); **SIGNALS AND FLAGS** (his `Flags`, his `Edge` chips, and for each chip a short why and Model Check's record
-for it as of the last `dfs results update`, `results_update.signal_table_path`); **IN YOUR LINEUPS** (how many built lineups, which `L<n>`, and the Exposure tab's share, Target and gap). Source code:
-`player_card` (pure; one `Field` spec drives both the formula and the text), `sheet_player_card` (I/O), `sources/player_log` (the last-five-games data).
-
-### Compare
-
-The Player card for up to four players side by side, right after `Player` (`sheet_style.WEEK_ORDER`, family `decide`). **`B1:E1` are the only typed cells**: name dropdowns over EdgeRaw's Name column (warn, never reject);
-warning-only protection with those four carved out (`sheet_protection.protect_compare`). Row 2 is a small helper row (each picker's position in EdgeRaw, a `MATCH`, blank when the picker is empty); row 3 asks for a pick, or says
-"different positions picked" when they differ. Every other cell is an `INDEX` into an EdgeRaw column (letter from `derived.edge_sheet_letter`, through the Player card's `Field` specs) behind the helper's blank guard, so an empty
-picker is a blank column, never an error. Rows, top to bottom: **PLAYER** (team, position, salary, opponent, kickoff, status, flags); **PROJECTIONS** (TFFB, Sleeper, FantasyPros, ESPN, Props, AggPts, CalPts, Hit3x%, Boom%, Bust%,
-model ceiling, Val, ValAdj); **OWNERSHIP** (Own%, GppOwn, CashOwn, Leverage); **USAGE** (Snap% / targets / carries / DK points over the last five games, target share, xFP per game, last three, trend); **OPPORTUNITY PER DOLLAR**
-(TPRR~, xFP, targets and HVT per $1k, PriceGap); **MATCHUP AND GAME** (total, spread, implied, OppPosRank, OppEPA, wind); **IN YOUR LINEUPS** (count and Exposure). The game-by-game rows, props and signals stay on `Player`.
-
-The best value per row is green: **lowest** for Bust% and OppPosRank (1 = softest), **highest** for the projections, Val, Leverage, usage and opportunity rows. Salary and the three ownership rows are never shaded (Sam,
-2026-10-22: the better side depends on cash vs GPP), nor are spread, wind, team, status, flags and the lineup counts. The OppEPA row is labelled "OppEPA (whole defense)" here and on `Player`: OppPosRank is that defense against his
-position, OppEPA the defense overall, so they can disagree. A cell is shaded only when two or more players have a number and they are not all equal (`compare_card.best_columns`; one conditional-format rule per row,
-`compare_card.highlight_specs`). **Created by `dfs setup compare`** (template first, then the live week; `dfs doctor` after); **rebuilt** by a `dfs sync` that widens EdgeRaw, only on a sheet that has the tab (`sheet_compare.rebuild_if_widened`),
-keeping the four names. Source code: `compare_card` (pure), `sheet_compare` (I/O).
+Both tabs, and the Player tab's hidden `PlayerCardRaw` / `PlayerCardRows`, were removed in batch F9 (2026-11-17):
+nothing writes or reads them, no formula on another tab pointed at them, and `dfs doctor` reports any that are still on
+a sheet as `retired-tab` until it is deleted by hand. One player in full is the Week page's player drawer (every source,
+ownership, the last five games game by game, matchup, this week's prop lines, the signals with their record) and its
+compare tray (`week_compare.SECTIONS`, the Compare tab's rows and directions); every number is also an EdgeRaw column.
+Their last layout is on main at `1535519` and in `CONTRIBUTING.md`'s structural changelog.
 
 ### Cockpit
 

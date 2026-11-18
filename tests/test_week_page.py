@@ -7,6 +7,7 @@ import json
 import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -830,3 +831,71 @@ def test_a_player_missing_from_the_pool_gets_a_one_click_add():
 
     assert wb.kind_of(["Value"]) == "Cash" and wb.kind_of(["Upside"]) == "GPP"
     assert wb.kind_of(["Cash core", "Upside"]) == "Both"
+
+
+# ---- the drawer's game log and prop lines (they replaced the sheet's Player tab, removal F9) -------------
+
+
+def _drawer_inputs(tmp_path, week=11):
+    edge = [
+        {"Id": "101", "Name": "Nico Collins", "Team": "HOU", "Position": "WR", "NameKey": "nico collins"},
+        {"Id": "102", "Name": "Somebody Else", "Team": "KC", "Position": "WR", "NameKey": "somebody else"},
+    ]
+    return week_inputs.WeekInputs(season=2026, week=week, now=SAT, data_dir=tmp_path, edge=edge)
+
+
+def test_the_drawer_gets_this_weeks_prop_lines_by_market_and_never_another_weeks(tmp_path):
+    sample = json.loads(
+        (Path(__file__).parent / "fixtures" / "odds_api" / "event_odds_sample.json").read_text()
+    )
+    pulls = tmp_path / "raw" / "odds_props"
+    pulls.mkdir(parents=True)
+    (pulls / "20261121T150000Z.json").write_text(json.dumps({"week": 11, "events": [sample]}))
+    lines, note = week_page.prop_lines(_drawer_inputs(tmp_path))
+    assert list(lines) == ["101"]  # a player the pull does not quote has no lines
+    assert [x["m"] for x in lines["101"]] == ["Receptions", "Receiving yards", "Anytime TD"]
+    assert lines["101"][1]["line"] == 72.5 and lines["101"][2]["line"] is None
+    assert 0 < lines["101"][0]["p"] < 1 and lines["101"][0]["books"] >= 1
+    assert note.startswith("Week 11 pull of Sat Nov 21")
+    lines, note = week_page.prop_lines(_drawer_inputs(tmp_path, week=12))
+    assert lines == {} and "No props pulled for week 12" in note
+
+
+def test_the_drawers_game_log_carries_target_share_and_red_zone_looks(tmp_path):
+    current = tmp_path / "current"
+    current.mkdir()
+    with (current / "player_log.csv").open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "NameKey",
+                "Name",
+                "Team",
+                "Position",
+                "Back",
+                "Wk",
+                "Opp",
+                "Snap%",
+                "Tgt",
+                "Car",
+                "Tgt%",
+                "RZ",
+                "In5",
+                "DK",
+            ]
+        )
+        w.writerow(["nico collins", "Nico Collins", "HOU", "WR", 1, 10, "JAX", 0.9, 9, 0, 0.31, 3, 1, 22.4])
+    games = week_page.player_log(_drawer_inputs(tmp_path))["101"]
+    assert games == [
+        {
+            "Wk": "10",
+            "Opp": "JAX",
+            "Snap": 0.9,
+            "Tgt": 9,
+            "Car": 0,
+            "TgtShare": 0.31,
+            "RZ": 3,
+            "In5": 1,
+            "DK": 22.4,
+        }
+    ]

@@ -726,22 +726,6 @@ Create the `Cockpit` tab right before Board (to its left), or rebuild it. One re
 |---|---|
 | `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
 
-### `dfs setup player-card`
-
-Create the `Player` tab right after Edge Finder, or rebuild it. Pick a player in B1 (a dropdown over EdgeRaw's names, the only typed cell) and read everything about him on one page: projections side by side, ownership, his last five games of usage, matchup and game, props, the signals firing on him with Model Check's record for each, and how many of your lineups he is in. Formulas over EdgeRaw plus two hidden raw tabs that `dfs sync` keeps fresh (only on a sheet that has the tab). Template first, then the live week; `dfs doctor` after.
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
-
-### `dfs setup compare`
-
-Create the `Compare` tab right after the Player tab, or rebuild it. Pick up to four players in B1:E1 (dropdowns over EdgeRaw's names, the only typed cells) and read the Player card's measures side by side: projections, ownership, usage, opportunity per dollar, matchup and game, and your lineups. The best value in each row is green (lowest for Bust% and OppPosRank; salary and ownership are never shaded). Formulas over EdgeRaw only; a sync that widens EdgeRaw rebuilds it (only on a sheet that has the tab). Needs the Player tab (`dfs setup player-card`) to place it after. Template first, then the live week; `dfs doctor` after.
-
-| Option | What it does |
-|---|---|
-| `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
-
 ### `dfs setup stacks`
 
 Create the `Stacks` tab right after Suggested, or rebuild it: the top 20 QB stacks and top 8 games ranked by simulated upside against how much of the field plays them, with the retro's track record on top. Nothing on it is typed. `dfs stacks` and `dfs sync` keep it fresh from then on (only on a sheet that has the tab). Needs the fitted field model (`dfs stacks --refit` once). Template first, then the live week; `dfs doctor` after.
@@ -858,7 +842,7 @@ What `dfs sync --only NAME[,NAME]` takes. A plain `dfs sync` runs all of them in
 | `snaps` | `SnapsRaw` | - | nflverse's free, unauthenticated snap-count release -- Part C, C6. |
 | `pbp` | `TeamMetricsRaw` | - | nflverse's free, unauthenticated play-by-play release -- Part C, C7. |
 | `usage` | `(none)` | - | Per-player usage (`Tgt%`, `WOPR`, `Rush%`, `RZ/G`, `HVT/G`); no sheet tab, it feeds EdgeRaw. |
-| `player_log` | `(none)` | - | Each QB / RB / WR / TE's last five games played, for the Player card (`player_card.usage_log`). |
+| `player_log` | `(none)` | - | Each QB / RB / WR / TE's last five games played (`usage_log`), saved as `data/current/player_log.csv`. |
 | `usage_weeks` | `(none)` | - | The Week page's usage view (Plan O item 6): every game of the season per player (`usage_weeks`) and per team (`team_weeks`). |
 | `team_weeks` | `(none)` | - | The Week page's usage view (Plan O item 6): every game of the season per player (`usage_weeks`) and per team (`team_weeks`). |
 | `ffopportunity` | `(none)` | - | Per-player-week expected points (`xFP`), current and prior season; no sheet tab. |
