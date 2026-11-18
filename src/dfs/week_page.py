@@ -1519,8 +1519,8 @@ DAY_ORDER: dict[int, list[str]] = {
     ],
 }
 OPEN_ON_SUNDAY = "inactives"  # Sunday: the inactives check is open when anything is flagged
-# Monday and Tuesday: what won is open (Monday: right under the ledger, blueprint Phase B; Tuesday: on top)
-OPEN_ON_DAY = {0: "field-review", 1: "field-review"}
+# Monday: what won is open, right under the ledger (blueprint Phase B); every other day it is one line
+OPEN_ON_DAY = {0: "field-review"}  # Tuesday folds it too: the Close view leads (Sam, 2026-11-18)
 DAY_ORDER[3] = DAY_ORDER[4] = DAY_ORDER[2]
 SECTION_IDS = FOLD_IDS
 

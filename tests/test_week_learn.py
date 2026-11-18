@@ -84,12 +84,16 @@ def test_what_won_shows_the_winner_the_line_and_the_field(tmp_path):
     assert "Week 8; Double Up line 123.3" in text  # the fold line
 
 
-def test_monday_and_tuesday_open_what_won_at_the_top_and_thursday_folds_it(tmp_path):
+def test_monday_opens_what_won_and_tuesday_and_thursday_fold_it_to_one_line(tmp_path):
+    """Sam, 2026-11-18: on Tuesday the Close view leads, so what won is one line, open on a click."""
+    tue = datetime(2026, 11, 3, 10, 0).astimezone()
+
     def opened(now):
         page = render(inputs(tmp_path, slate_rows(), now=now, field_review=FIELD_REVIEW))
+        assert '<section class="card fold" id="field-review"><details' in page  # there, as a fold
         return '<section class="card fold" id="field-review"><details open>' in page
 
-    assert opened(MON) and not opened(THU)
+    assert opened(MON) and not opened(tue) and not opened(THU)
 
 
 def test_every_trust_chip_links_to_the_numbers_section(tmp_path):
