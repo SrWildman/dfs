@@ -451,6 +451,23 @@ def test_the_claude_command_line_uses_the_login_streams_json_and_the_page_for_ap
     assert auto[auto.index("--permission-mode") + 1] == "auto"
 
 
+def test_the_chat_appends_every_shortcut_to_its_system_prompt(tmp_path):
+    """CLAUDE.md lists only the standard week's phrases; the chat loads the whole of docs/SHORTCUTS.md."""
+    args = week_chat.StartArgs(week_chat.Settings("opus", "high", False), None, Path("."), {})
+    cmd = week_chat.claude_command(args)  # this checkout's file
+    prompt = cmd[cmd.index("--append-system-prompt") + 1]
+    assert prompt.startswith(week_chat.SHORTCUTS_HEAD)
+    for phrase in ('"fix flex"', '"never Kyren"', '"season sync"', '"late swap"'):
+        assert phrase in prompt
+    (tmp_path / "docs").mkdir()
+    row = '| "sync" | `dfs sync` | the sources |\n'
+    (tmp_path / "docs" / "SHORTCUTS.md").write_text(row)
+    cmd = week_chat.claude_command(args, root=tmp_path)
+    assert cmd[cmd.index("--append-system-prompt") + 1] == week_chat.SHORTCUTS_HEAD + row
+    missing = week_chat.claude_command(args, root=tmp_path / "nowhere")  # no file: the chat still starts
+    assert "--append-system-prompt" not in missing and missing[:2] == ["claude", "-p"]
+
+
 def test_the_chat_environment_drops_api_keys(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret")
     monkeypatch.setenv(run_lock.INHERIT_ENV, "99")

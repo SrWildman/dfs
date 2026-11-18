@@ -80,8 +80,8 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 - `dfs stacks [--sheet-id <id>] [--no-sheet] [--refit] [--retro]` -- ranks every QB's stacks of one and two teammates (WR/TE, or a RB
   whose `Tgt%` is in the top third of the slate's RB1/RB2; with and without a bring-back) by simulated Top 1% rate against how much of the
   generated GPP field plays them, and writes the read-only **Stacks** tab (right after Suggested; top 20 stacks, top 8 games, the retro's
-  track record on top, column A `BUILD` = one of the 5 highest-leverage stacks that beat the field (Lift > 1x, Lev > 0; `stacks_tab.BUILD_CUES`), a pale green row: type
-  the last cell's `Always use: ...` line into Suggested's rules box; `Top 1%` / `Lift` / `Lev` are colour-scaled and row 3 is the colour legend). Prints the same page; writes the sheet
+  track record on top; information only: no row is cued or tinted, and columns A and M stay blank where the `BUILD` cue and its
+  `Always use: ...` line were until Removal F8, so nothing moves; `Top 1%` / `Lift` / `Lev` are colour-scaled and row 3 is the colour legend). Prints the same page; writes the sheet
   only where the tab exists. Before TFFB publishes ownership the field %/leverage columns read `-` (a CalPts stand-in drives the field). `--refit` refits
   the field model on the real standings (about two minutes, saved in `data/model_cache/stack_field.json`); `--retro` refits and reruns the retro
   that is the tab's track record (`data/model_cache/stacks_retro.json`, several minutes; run it after `dfs week close`). Math in `stacks.py`
@@ -124,8 +124,8 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   plan $Y (by format)": facts, no "over"). Leaves `contest_plan` and `ledger` for the Week page (`week_inputs.save_input`).
 - **Contest tiers** (`contest_tiers.py`, evidence in `docs/CONTESTS.md`): rules, not a lobby list. A / B / C / Avoid from a contest's
   format, fee, field, entries per user, prize pool and min-cash, with the rake, a reason and flags; the Weekly Budget splits about
-  60 / 30 / at most 10% (and $15) across A / B / C. On the Week page: the plan in dollars, what to look for, the day's reminder, the
-  check form, and the entries drop's spend by tier against the plan before lock. `dfs contests plan` adds the tier view; `week close`
+  60 / 30 / at most 10% (and $15) across A / B / C. On the Week page: the plan in dollars, what to look for, the day's reminder
+  and the entries drop's spend by tier against the plan before lock. `dfs contests plan` adds the tier view; `week close`
   prints one line (planned against spent by tier). `[contest_plan] casual_eligible = false`: Sam is not eligible for Casual contests.
 - `dfs contests dupes [--weeks 4,5,6] [--dry-run]` -- refits the copies estimate on the saved standings (each week held
   out, ownership too), prints the error, saves `data/model_cache/dup_calibration.json`; files only. `week close` reruns it.
@@ -202,8 +202,9 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   chalk and any contradicted label ("no call: label under review", `plays.held_back`). Weights are a ridge fit toward a prior, walk-forward, saved in
   `data/research/calls_weights/`. Every `dfs sync` (and `week new`'s) adds a timestamped version to
   `data/week/inputs/<season>-wk<NN>-calls.json` and prints the "new must-plays" (calls that moved up). `--inactives` runs
-  `dfs sync --live` first (which refreshes the Cockpit). Never writes a sheet. The Week page shows the calls,
-  shadow, in Model vs sources and the Overview's fades (`docs/WEEK_PAGE.md`), with the hold-back above.
+  `dfs sync --live` first (which refreshes the Cockpit). Never writes a sheet. The Week page shows only the
+  AVOID and FADE calls, shadow, with their records (Model vs sources, Saturday's Fades, the Overview; `docs/WEEK_PAGE.md`),
+  with the hold-back above; CORE / PLAY / TARGET / LEVERAGE are still computed and scored but left the page in Removal F8.
   Backtest: `python -m dfs.research.plays_backtest run` (report in `docs/research/plays/`, gitignored). Flashback:
   `dfs backtest --settings research/settings/calls_cash.toml --compare research/settings/today_cash.toml`
   (flag `calls`: `true` = CORE locked + AVOID banned; M1.5's ban-only variants `"avoid"` with `calls_avoid_cash.toml` against

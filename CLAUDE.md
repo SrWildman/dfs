@@ -100,7 +100,7 @@ positions, never hardcode them.**
 
   Then follow the doc-sync table in `CONTRIBUTING.md` ("You changed / Update"), which includes the Instructions
   tab on **both** sheets.
-- A change to the page's chat: run `python scripts/chat_smoke.py` (three turns against real Claude; not in
+- A change to the page's chat: run `python scripts/chat_smoke.py` (four turns against real Claude; not in
   pytest).
 - Code shape: pure logic in one module, sheet or file I/O in a `sheet_*.py` or `*_store.py` beside it. Anything
   a sync or a close runs as a side effect fails soft: it warns, and the command carries on. A sync refreshes a

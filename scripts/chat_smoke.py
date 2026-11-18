@@ -5,13 +5,15 @@ Sam's login). Run it after any change to the chat (`week_chat.py`, the panel in 
     python scripts/chat_smoke.py --model opus --effort high
 
 It drives the chat's own code (`ChatManager` + `SubprocessRunner`, exactly what `dfs week serve` runs) through
-three turns of one chat and prints PASS or FAIL for each:
+three turns of one chat, then one new chat, and prints PASS or FAIL for each:
 
 1. one turn: a short reply, with text, at least one turn and a cost;
 2. a follow-up (`--resume`): it must remember turn 1 and come back with NEW text and a NEW cost (Week 9's
    "is it done?" came back with 0 turns, no text and the old cost);
 3. a turn that runs a 30-second command: it must run in the FOREGROUND (the chat's Claude Code has no
-   background commands), finish, and the turn must end only after it, with text.
+   background commands), finish, and the turn must end only after it, with text;
+4. a new chat asked what Sam's phrase "fix flex" means, with no file to read: the answer must name the sheet's
+   **Fix FLEX order** script, which is only in `docs/SHORTCUTS.md`, the file the chat appends to its prompt.
 
 It runs in a scratch directory (no repo files, no sheet, no `data/`), keeps its chat out of this week's list,
 and approves only the one command step 3 asks for (anything else is denied). Exit code 0 when every step
@@ -145,6 +147,23 @@ def main() -> int:
                 and "problem" not in done3,
                 f"ran={bool(tools)} printed smoke-ok={printed} background={background} text={text3[:60]!r} "
                 f"turns={done3.get('turns')} problem={done3.get('problem')} ({secs:.0f}s)",
+            )
+        )
+
+        # 4. every phrase is in the prompt (docs/SHORTCUTS.md), with nothing to read in the scratch dir
+        turn, events, secs = run_turn(
+            chat,
+            'Without using any tools: when Sam says "fix flex", what do your instructions say to tell him? '
+            "Answer in one sentence.",
+            settings,
+            None,
+        )
+        done4, text4 = done_of(events), text_of(events)
+        results.append(
+            check(
+                "4 every phrase in the prompt",
+                "fix flex order" in text4.lower() and done4.get("ok") is True and "problem" not in done4,
+                f"text={text4[:90]!r} problem={done4.get('problem')} ({secs:.0f}s)",
             )
         )
     passed = sum(results)

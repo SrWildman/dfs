@@ -12,6 +12,11 @@ One turn is one `claude -p` process in Claude Code's stream-JSON mode (`--input-
   with the turn, so a background command would die with it; long commands run in the foreground, and the
   panel shows "still running: <command>, 4m12s" while one does.
 
+- **Every phrase, up front.** `CLAUDE.md` lists only the standard week's phrases and points at
+  `docs/SHORTCUTS.md`; the chat appends that whole file to Claude Code's system prompt
+  (`--append-system-prompt`, `shortcuts_prompt`), so a phrase Sam types on the page never depends on the
+  session opening the file. The file is read from this checkout (the one the server's code came from) on every
+  turn; when it cannot be read the chat starts without it.
 - **Sam's own login.** No API key is passed (an `ANTHROPIC_API_KEY` in the environment is dropped so the
   login is what runs), `--bare` is never used (it skips CLAUDE.md), and nothing is stored in the repo.
 - **Permissions are never bypassed.** The default mode applies (the repo's allow rules work as in the
@@ -129,8 +134,27 @@ def main_checkout(root: Path | None = None) -> Path:
     return root
 
 
-def claude_command(args: StartArgs, claude: str = "claude") -> list[str]:
-    """The `claude` argv for one turn (see the module docstring)."""
+SHORTCUTS_DOC = Path("docs") / "SHORTCUTS.md"
+SHORTCUTS_HEAD = (
+    "The Week page's chat has loaded Sam's shortcuts below (docs/SHORTCUTS.md, the file CLAUDE.md "
+    "points at). When Sam uses one of these phrases, run exactly what its row lists, in order, and "
+    "report what its last column says.\n\n"
+)
+
+
+def shortcuts_prompt(root: Path | None = None) -> str | None:
+    """`docs/SHORTCUTS.md` with a one-line header, for the chat's system prompt; None when it cannot be
+    read."""
+    try:
+        text = ((root or paths.REPO_ROOT) / SHORTCUTS_DOC).read_text()
+    except OSError:
+        return None
+    return SHORTCUTS_HEAD + text if text.strip() else None
+
+
+def claude_command(args: StartArgs, claude: str = "claude", root: Path | None = None) -> list[str]:
+    """The `claude` argv for one turn (see the module docstring). `root` is the checkout whose
+    `docs/SHORTCUTS.md` is appended (this one by default)."""
     if args.settings.permission_mode not in PERMISSION_MODES:
         raise BadRequest("permission mode not allowed")
     cmd = [
@@ -150,6 +174,9 @@ def claude_command(args: StartArgs, claude: str = "claude") -> list[str]:
         "--effort",
         args.settings.effort,
     ]
+    shortcuts = shortcuts_prompt(root)
+    if shortcuts:
+        cmd += ["--append-system-prompt", shortcuts]
     if args.settings.auto:
         cmd += ["--permission-mode", "auto"]
     if args.resume:
