@@ -234,11 +234,10 @@ _WEEK_ROWS: list[tuple[str, str]] = [
     (
         "Sat / Sun morning: the contest plan",
         _contest_plan_text()
-        + "To judge one contest before you enter it, use the check this contest form on the Week page (dfs "
-        "week serve): format, fee, entrants so far and the most it can hold, entries per user, prize pool or "
-        "min-cash. It answers with the tier, the rake and the reason. Saturday: set the plan before you "
-        "build, and enter against it. Sunday morning: look at the lobby once more for small fields "
-        "released late and for an overlay (a guaranteed contest under "
+        + "To judge one contest before you enter it, read it against the tiers above: format, fee, entrants "
+        "so far and the most it can hold, entries per user, prize pool or min-cash. Saturday: set the "
+        "plan before you build, and enter against it. Sunday morning: look at the lobby once more for "
+        "small fields released late and for an overlay (a guaranteed contest under "
         f"{contest_tiers.OVERLAY_FILL:.0%} full within two hours of lock). Dropping DraftKings' entries file "
         "on the Week page shows what you have spent by tier against the plan while you can still withdraw.",
     ),

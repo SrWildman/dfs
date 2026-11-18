@@ -26,7 +26,6 @@ from __future__ import annotations
 import functools
 import json
 import os
-import re
 import shlex
 import signal
 import subprocess
@@ -45,7 +44,6 @@ from dfs import commands_doc, launcher, paths, run_lock
 OUTPUT_LINES = 3000
 STOP_WAITS = (4.0, 5.0, 3.0)
 HISTORY_SHOWN = 15
-OUTPUT_KEPT = 30  # past runs whose output is kept on disk for "Recent runs"
 
 # Commands that rewrite tabs or reset a week: the page makes Sam type them out.
 CONFIRM_COMMANDS = frozenset({"dfs week new", "dfs week close", "dfs lineups clear", "dfs pool clear"})
@@ -461,10 +459,6 @@ class JobRunner:
         except Exception as exc:  # noqa: BLE001 - a callback never fails a job
             self.log(f"job callback failed: {type(exc).__name__}")
 
-    @property
-    def output_dir(self) -> Path:
-        return self.history_path.parent / "jobs"
-
     def _remember(self, job: Job) -> None:
         seconds = round((datetime.now(UTC) - job.started).total_seconds(), 1)
         try:
@@ -485,27 +479,6 @@ class JobRunner:
                 )
         except OSError:
             pass
-        try:  # the output, for "Recent runs" (the newest OUTPUT_KEPT only)
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-            (self.output_dir / f"{job.id}.log").write_text("\n".join([f"$ {job.command}", *job.lines]) + "\n")
-            logs = sorted(self.output_dir.glob("*.log"), key=lambda q: q.stat().st_mtime)
-            for old in logs[:-OUTPUT_KEPT]:
-                old.unlink(missing_ok=True)
-        except OSError:
-            pass
-
-    def output(self, job_id: str) -> list[str] | None:
-        """A run's output: the running or recent job's lines, else its saved log; None when there is none."""
-        if not re.fullmatch(r"[0-9a-f]{10}", job_id or ""):
-            return None
-        job = self.jobs.get(job_id)
-        if job is not None:
-            with job.cond:
-                return [f"$ {job.command}", *job.lines]
-        try:
-            return (self.output_dir / f"{job_id}.log").read_text().splitlines()
-        except OSError:
-            return None
 
     def history(self, limit: int = HISTORY_SHOWN) -> list[dict]:
         try:

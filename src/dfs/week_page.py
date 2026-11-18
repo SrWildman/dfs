@@ -730,16 +730,15 @@ def gpp_section(inp: WeekInputs) -> Section:
                 e(pct(num(r.get("top1")), 1)),
                 e(f"{r['lift']:.1f}x") if num(r.get("lift")) is not None else "-",
                 e(pct(num(r.get("lev")), 1)) if r.get("lev") is not None else "-",
-                code(r.get("rule", "")),
             ]
             for r in stacks["rows"]
         ]
         body.append(
             table(
-                ["QB", "Teammates", "Game", "Top 1%", "Lift", "Lev", "Type in Suggested's rules box"],
+                ["QB", "Teammates", "Game", "Top 1%", "Lift", "Lev"],
                 rows,
-                how="The Stacks tab's top rows as dfs stacks saved them: each QB stack's simulated Top 1% "
-                "rate against how much of the generated GPP field plays it.",
+                how="Information: the Stacks tab's top rows as dfs stacks saved them: each QB stack's "
+                "simulated Top 1% rate against how much of the generated GPP field plays it.",
             )
         )
         body.append(
@@ -1208,20 +1207,6 @@ def tools_html(inp: WeekInputs, tools: list[week_tools.Tool]) -> str:
 # -- the page ---------------------------------------------------------------------------------------
 
 CSS = """
-:root{--bg:#f5f6f3;--card:#fff;--ink:#1c2420;--dim:#5f6b65;--line:#dde2de;--accent:#2d5f8a;
---accent-soft:#e1ecf5;
---proven:#2f6b4f;--proven-soft:#e2efe7;--shadow:#8a6d1f;--shadow-soft:#f4ecd4;--untested:#62706a;
---bad:#b8462e;
---bad-soft:#f7e4de;--warn:#8a5a00;--ok:#2f6b4f;--flag:#fff3d6;--wr:#2d5f8a;--rb:#2f6b4f;--te:#a8781a;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#121513;--card:#1a1f1c;--ink:#e6ebe8;
---dim:#9aa69f;--line:#2d3531;--accent:#7fb2df;--accent-soft:#18283a;--proven:#73c197;--proven-soft:#1d3328;
---shadow:#d8bf73;--shadow-soft:#332b16;--untested:#9aa69f;--bad:#ec8a72;--bad-soft:#3a221c;--warn:#e0b04a;
---ok:#73c197;--flag:#3a3015;--wr:#7fb2df;--rb:#73c197;--te:#e0b04a;--s1:#3987e5;--s2:#d95926;--s3:#199e70}}
-:root[data-theme=dark]{--bg:#121513;--card:#1a1f1c;--ink:#e6ebe8;--dim:#9aa69f;--line:#2d3531;
---accent:#7fb2df;
---accent-soft:#18283a;--proven:#73c197;--proven-soft:#1d3328;--shadow:#d8bf73;--shadow-soft:#332b16;
---untested:#9aa69f;--bad:#ec8a72;--bad-soft:#3a221c;--warn:#e0b04a;--ok:#73c197;--flag:#3a3015;--wr:#7fb2df;
---rb:#73c197;--te:#e0b04a;--s1:#3987e5;--s2:#d95926;--s3:#199e70}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,
 BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 header,main{max-width:2400px;margin:0 auto;padding:0 16px}header{padding-top:18px}
@@ -1778,7 +1763,10 @@ def render(
         week_explorer,
         week_learn,
         week_money,
+        week_saturday,
         week_shade,
+        week_shell,
+        week_style,
         week_top,
         week_ui,
         week_views,
@@ -1837,7 +1825,7 @@ def render(
                 OPEN_ON_DAY.get(day) == sid and built[sid].ran
             )
             folds.append(
-                fold_html(built[sid], line, urgent, open_) + (LIVE_CONTEST if sid == "contest-plan" else "")
+                week_views.wrap(fold_html(built[sid], line, urgent, open_), week_views.fold_views(sid))
             )
         sources = sorted(inp.manifest)
         failed = [n for n in sources if inp.manifest[n].get("error")]
@@ -1850,16 +1838,13 @@ def render(
             season_at=parse_time((inp.season_long or {}).get("saved_at")),
             day=day,
         )
-        theme = week_today.DAY_THEME[day].lower()
         sub = (
-            f"{e(week_today.DAY_NAMES[day])} &middot; {e(theme)} &middot; "
             f"{len(sources) - len(failed) - len(pending)} of {len(sources)} sources synced"
             + (f", {len(pending)} pending ({e(', '.join(pending))})" if pending else "")
             + (f", {len(failed)} failed ({e(', '.join(failed))})" if failed else "")
             + (f" &middot; sheet: {e(sheet.title)}" if sheet is not None and sheet.title else "")
-            + f" &middot; built {e(kickoff.format_et(inp.now))}"
+            + f" &middot; {e(source)}"
         )
-        stale_html = '<p class="note warn">Stale: ' + e("; ".join(stale)) + "</p>" if stale else ""
         data = week_explorer.payload(
             inp,
             board,
@@ -1874,40 +1859,57 @@ def render(
         wrap = week_views.wrap
         rules_json = json.dumps(rules or {}).replace("</", "<\\/")
         live_data = f'<script type="application/json" id="rules-was">{rules_json}</script>' if live else ""
+        built_core = bool(((inp.cash_core or {}).get("default") or {}).get("names"))
+        built_any = built_core or bool(builds_of(inp, "cash") or builds_of(inp, "gpp"))
+        lines = week_shell.status_lines(inp, lv, by_id)
+        core_ds = [d for d in ds if d.kind in ("core", "spot")]
+        chalk_ds = [d for d in ds if d.kind == "chalk"]
+        # the chalk Play / Fade sit on "Chalk you're not on" once there is a lineup to compare with
+        other_ds = [d for d in ds if d.kind not in ("core", "spot") and not (built_any and d.kind == "chalk")]
+        calls = (
+            wrap(week_top.decisions_html(other_ds, live, inp.now, rules is not None, by_id), "decisions")
+            if other_ds
+            else ""
+        )
+        digest = wrap(week_saturday.digest_html(inp, board, open_=not built_any), "digest")
+        saturday = (
+            (
+                wrap(week_saturday.chalk_html(inp, ds=chalk_ds, live=live), "chalk")
+                + wrap(week_top.cash_main_html(inp, core_ds, board, live), "decisions")
+                + calls
+                + digest
+                if built_any
+                else digest + calls  # before a build the slate leads (Sam, 2026-11-17)
+            )
+            + wrap(week_saturday.fades_html(inp, board, open_=False), "fades")
+            + wrap(week_top.pool_panel_html(panel, live, source), "pool")
+        )
+        side = wrap(week_top.cash_lineup_side(inp), "side-build") + wrap(
+            week_shell.this_week_html(steps, live) + LIVE_CONTEST, "side"
+        )
         page = (
             "<!doctype html><html lang=en><head><meta charset=utf-8>"
             '<meta name=viewport content="width=device-width,initial-scale=1">'
             f'<meta name="dfs-week" content="{inp.season}-{inp.week:02d}">'
-            f"<title>Week {inp.week}</title><style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}"
-            f"{week_top.CASH_CSS}{week_money.LEDGER_CSS}{week_top.STRIP_CSS}{week_learn.CLOSE_CSS}</style>"
-            f'</head><body data-state="{e(st)}">'
-            f'<header><h1>Week {inp.week}, {inp.season}</h1><p class="sub">{sub}</p></header><main>'
-            # blueprint C2: the strip (five tiles); the six steps sit under the brief's "next" line
-            + (week_top.strip_html(lv.tiles) if lv is not None else week_top.progress_html(steps))
-            + stale_html
-            + '<div class="grid">'
-            + week_top.brief_html(
-                sentences,
-                wb.next_step(steps),
-                live,
-                week_today.DAY_NAMES[day],
-                steps if lv is not None else None,
-            )
-            + wrap(week_top.pool_panel_html(panel, live, source), "pool")
-            + "</div>"
-            # Plan O2: the view bar; each block below names the views it shows on (`week_views.PLACES`)
-            + week_views.view_bar(st if st in week_views.VIEW_NAMES else week_views.DEFAULT_VIEW)
+            f"<title>Week {inp.week}, {inp.season}</title>"
+            f"<style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}"
+            f"{week_top.CASH_CSS}{week_money.LEDGER_CSS}{week_top.STRIP_CSS}{week_learn.CLOSE_CSS}"
+            f"{week_style.CSS}</style>"
+            f'</head><body data-state="{e(st)}"><main>'
+            + week_shell.header_html(inp, st, live, sub, week_shell.stale_text(stale))
+            + "".join(wrap(lines[k], f"status-{k}") for k in ("build", "lock", "close"))
+            + '<div class="layout"><div class="mainc">'
+            + saturday
             + wrap(week_views.lock_section(inp, lv, live), "lock")
             # blueprint Phase D: the closed week on one screen (the clock's `close` state opens it)
             + wrap(week_learn.close_section(inp, live).html(), "close")
-            + wrap(week_views.overview_section(inp, board, panel), "overview")
-            # blueprint Phase A: the Default cash lineup, its core and open spots (their decisions live there)
-            + wrap(week_top.cash_block_html(inp, ds, board, live), "decisions")
+            + "".join(folds)
+            + f'</div><aside class="side" aria-label="This week">{side}</aside></div>'
+            + week_shell.more_html()
             + wrap(
-                week_top.decisions_html(
-                    [d for d in ds if d.kind not in ("core", "spot")], live, inp.now, rules is not None, by_id
-                ),
-                "decisions",
+                week_top.brief_html(sentences, wb.next_step(steps), live, week_today.DAY_NAMES[day])
+                + week_views.overview_section(inp, board, panel),
+                "overview",
             )
             + wrap(week_top.board_html(board, by_id, live, week_money.practice_by_id(inp)), "board")
             + wrap('<div class="charts-row">' + week_top.charts_html(inp.edge, own_out) + "</div>", "charts")
@@ -1916,7 +1918,6 @@ def render(
             + wrap(week_views.usage_section(inp), "usage")
             + wrap(week_views.injury_section(inp), "injuries")
             + wrap(week_views.model_section(inp), "model")
-            + wrap('<h2 class="sec">The rest of the week</h2>' + "".join(folds), "rest")
             + wrap(LIVE_RUN + tools_fold(inp, tools), "runs")
             + "</main>"
             + week_top.DRAWER

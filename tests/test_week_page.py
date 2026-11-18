@@ -341,7 +341,7 @@ def test_every_section_renders_from_fixture_outputs(full):
     assert (
         "PIT stack QB+WR" in text
         and "CeeDee Lamb" in text
-        and "Always use: Dak Prescott, CeeDee Lamb" in text
+        and "Always use: Dak Prescott, CeeDee Lamb" not in text  # Removal F8: no line to type
     )
     # unknowns: Q in the pool/builds with his kickoff, and the OUT player sitting in a build
     assert re.search(r"Puka Nacua\s+WR LAR\s+Questionable\s+Sun 4:25 pm", text)
@@ -532,12 +532,17 @@ def test_every_phrase_on_the_page_is_one_claude_code_knows_and_every_command_exi
 
 def test_the_progress_strip_and_the_next_step_come_from_the_real_state(full):
     page = html.unescape(week_page.render(full, registered=set(commands_doc.all_commands())))
-    # blueprint C2: the six steps sit under the brief's "next" line; the strip above holds five tiles
-    assert page.count('class="tile') == 5
-    strip = re.search(r'<div class="prog" id="progress".*?</div></div>', page, re.S).group(0)
-    assert strip.count('class="step ') == 6
-    assert 'class="step next"' in strip  # exactly one next step
-    assert strip.count('class="step next"') == 1
+    # the design pass: each day has its own status line of five facts (Sam's answer 4, 2026-11-17)
+    for day, labels in (
+        ("build", ["Lock", "Pool", "Builds", "News", "Entered"]),
+        ("lock", ["Lock", "News", "Lineups", "Swaps open", "Entered"]),
+        ("close", ["Week net", "Cash", "Scorecards", "Next"]),
+    ):
+        line = re.search(rf'<section class="sline" id="status-{day}".*?</section>', page, re.S).group(0)
+        assert re.findall(r'<div class="l">([^<]+)</div>', line) == labels, day
+    # the six steps sit in "This week" on the side, exactly one of them next
+    steps = re.search(r'<section class="card sec" id="progress".*?</section>', page, re.S).group(0)
+    assert steps.count("<li class=") == 6 and steps.count('<li class="next"') == 1
     assert 'Say <code class="say">"' in page.split('id="brief"')[1].split("</section>")[0]
 
 

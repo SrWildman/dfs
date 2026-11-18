@@ -85,16 +85,18 @@ def _ids(html):
 def test_every_block_names_real_views_and_no_element_id_shadows_a_view_hash(tmp_path):
     for place, views in week_views.PLACES.items():
         assert views.split() and set(views.split()) <= set(week_views.VIEW_NAMES), place
-        assert "everything" in views.split() or place == "overview", place  # Everything is the full page
+        # Everything is the full page; a day's status line belongs to its own day
+        assert "everything" in views.split() or place.startswith("status-"), place
     assert week_views.VIEW_NAMES[:3] == ("build", "lock", "close")  # the clock's states lead the bar
-    assert set(week_views.ALIASES) == {"overview"} and "overview" not in week_views.VIEW_NAMES
+    assert "overview" in week_views.VIEW_NAMES  # the old Saturday scan, one click away under More
     html = week_page.render(_inp(tmp_path))
-    assert 'id="views"' in html and html.index('id="brief"') < html.index(
-        'id="views"'
-    )  # the brief sits above
+    # the three days lead the header; every other view is on the More bar below the day's column
+    assert html.index('id="views"') < html.index('id="more"')
+    days = html[html.index('id="views"') : html.index("</nav>", html.index('id="views"'))]
+    assert [d for d in week_views.VIEW_NAMES if f'data-view="{d}"' in days] == ["build", "lock", "close"]
     assert not _ids(html) & set(week_views.VIEW_NAMES)  # #usage must open the view, not jump to an element
     for name in week_views.VIEW_NAMES:
-        assert f'href="#{name}" data-view="{name}"' in html
+        assert html.count(f'href="#{name}" data-view="{name}"') == 1, name
     for sid in ("overview-card", "lock-card", "usage-card", "injury-card", "model-card"):
         assert f'id="{sid}"' in html
     assert 'id="compare-spec"' in html and "window.dfsCompare" in html
@@ -184,9 +186,9 @@ def test_model_vs_sources_ranks_disagreements_and_leads_with_who_not_to_play(tmp
     )
     assert record["live"]["cash"]["AVOID"] == [1, 2] and record["live_weeks"] == [9]
     html = week_views.model_section(_inp(tmp_path, rows, calls_record=record))
-    assert (
-        html.index('data-label="AVOID"') < html.index('data-label="FADE"') < html.index('data-label="CORE"')
-    )
+    assert html.index('data-label="AVOID"') < html.index('data-label="FADE"')
+    for label in ("CORE", "PLAY", "TARGET", "LEVERAGE"):  # Removal F8: only the fades are shown
+        assert f'data-label="{label}"' not in html
     assert "backtest 60% of 202 (Weeks 2, 4-8) · live 1 of 2 (50%)" in html
     assert "backtest 76% of 63 (Weeks 4-8)" in html  # the GPP labels: the weeks with GPP standings
     none_yet = week_views.model_section(_inp(tmp_path, rows, calls_record={"backtest": BACKTEST, "live": {}}))

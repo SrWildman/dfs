@@ -35,16 +35,13 @@ def json_block(page: str, block_id: str) -> dict:
 # -- item 1: the chat folds to a tab, remembered per browser -------------------------------------------------
 
 
-def test_the_chat_toggle_is_remembered_per_browser_and_wrapped_in_try():
+def test_the_chat_starts_folded_on_every_load_and_ask_claude_opens_it():
+    """Sam, 2026-11-17: the chat is collapsed by default everywhere and never opens by itself."""
     js = week_live.JS
-    assert (
-        "localStorage.setItem('dfs-chat-collapsed'" in js
-        and "localStorage.getItem('dfs-chat-collapsed')" in js
-    )
-    for call in re.findall(r"[^\n]*localStorage\.[gs]etItem\('dfs-chat-collapsed'[^\n]*", js):
-        assert "try {" in call  # every access wrapped: a private window never breaks the page
+    assert "localStorage.setItem('dfs-chat-collapsed'" not in js  # nothing remembers it open
+    assert "chatFold(true, false)" in js and "ask-open" in js
     assert "chat-open" in js and "chat-closed" in js  # the layout follows it
-    assert "#chat.collapsed #chat-toggle{writing-mode:vertical-rl" in week_live.CSS  # the thin tab
+    assert "#chat.collapsed{display:none}" in week_live.CSS  # folded means gone, on every width
 
 
 # -- item 2: one column, wide ------------------------------------------------------------------------------

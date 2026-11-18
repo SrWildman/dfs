@@ -1,6 +1,6 @@
 """The Week page's shared client layer (Plan N items 1-10, 14): one script and one stylesheet on both the static
 page (`dfs week page`) and the served one (`dfs week serve`), where the served page's own script
-(`week_live.JS`) plugs in through `window.dfsLive` (its `pool` and `stack` writes, `refresh` and `toast`).
+(`week_live.JS`) plugs in through `window.dfsLive` (its `pool` write, `refresh` and `toast`).
 
 - **The pool store** (`window.dfsPool`, item 6): one client-side copy of every player's Pool value, from the
   Explorer's data and the page's Pool controls. Every place that shows a pool value (the board's and the
@@ -24,8 +24,7 @@ page (`dfs week page`) and the served one (`dfs week serve`), where the served p
   Inline SVG and plain JS, from `week_charts.viewer_data` (the inline charts' own points).
 - **The game view** (item 10): a slate card, or any team or Opp cell, opens the game: both teams side by side
   by position with salary, CalPts, ceiling, GPP own and leverage, the line and implied totals, and the Stacks
-  input's rows for the game; tick a QB, mates and a bring-back to add them as GPP or to write them as a Max
-  exposure `more` stack (served page only, `/api/stack`).
+  input's rows for the game; tick a QB, mates and a bring-back to add them as GPP.
 - **"How this is built"** (item 14): the note every table and chart carries (`week_page.how_html`) shows on
   hover, and on a tap (toggled here).
 
@@ -277,22 +276,57 @@ function resolveName(a) {
   if (ids.length !== 1) { a.classList.add('pl-unknown'); return ''; }
   a.dataset.id = ids[0]; return ids[0];
 }
+/* the design pass: one 22 px square LEFT of the name (before his position label), empty until hover, the
+   letter C / G / B when he is pooled; a name inside a sentence (prose) gets none: the drawer has it */
+const LETTER = {Cash: 'C', GPP: 'G', Both: 'B'};
 function chipPaint(c, v, saving) {
-  c.textContent = saving ? '\u2026' : (v || '+ pool'); c.classList.toggle('in', !!v);
+  c.textContent = saving ? '\u2026' : (LETTER[v] || '+'); c.classList.toggle('in', !!v); c.dataset.pool = v || '';
+  c.classList.remove('C', 'G', 'B'); if (LETTER[v] && !saving) c.classList.add(LETTER[v]);
   c.setAttribute('aria-label', 'Pool: ' + (v || 'not in pool') + '. Change');
+  c.title = v ? 'In your pool: ' + v + ' (click to change)' : 'Not in your pool (click to add)';
 }
 function decorate(root) {
   for (const a of $$('a.pl', root || document)) {
     if (a.closest('#drawer, .seg, svg, #pool-pop')) continue;
     const id = resolveName(a); if (!id) continue;
-    const next = a.nextElementSibling;
-    if (next && next.classList.contains('pchip')) continue;
+    const prev = a.previousElementSibling;
+    const anchor = prev && prev.classList.contains('posl') ? prev : a;
+    const before = anchor.previousElementSibling;
+    if (before && before.classList.contains('pchip')) continue;
     const ctx = a.closest('tr, li, .gp-row');
     if (ctx && ctx.querySelector('.seg[data-id="' + CSS.escape(id) + '"]')) continue;
-    const c = el('button', 'pchip'); c.type = 'button'; c.dataset.id = id; c.title = 'Your pool: Cash / GPP / Both / none';
-    chipPaint(c, pool.get(id), id in P.saving); a.after(c);
+    const c = el('button', 'pchip psq'); c.type = 'button'; c.dataset.id = id;
+    chipPaint(c, pool.get(id), id in P.saving); anchor.before(c);
   }
 }
+/* ---------- someone else, for an open spot (the design pass): his pool, limited to who fits the slot and the
+   salary left (the server's list, `week_saturday.spot_options`), each as a difference against the Default's
+   player; Pick writes the same `cash: Name` on Always use as a card */
+function otherDraw(d) {
+  const list = d.querySelector('.olist'), q = ((d.querySelector('input') || {}).value || '').trim().toLowerCase();
+  let opts = []; try { opts = JSON.parse(d.querySelector('.odata').textContent); } catch (e) {}
+  const mine = opts.filter((o) => pool.get(o.id));
+  const shown = mine.filter((o) => !q || o.name.toLowerCase().includes(q)).slice(0, 40);
+  list.replaceChildren();
+  if (!mine.length) { list.append(el('p', 'meta', 'Nobody in your pool fits this spot and the salary left (' + opts.length + ' on the slate do: add one from the board, then look again).')); return; }
+  if (!shown.length) { list.append(el('p', 'meta', 'No one by that name in your pool fits.')); return; }
+  const cell = (cls, label, text) => { const c = el('span', 'd ' + cls); c.append(el('i', null, label), document.createTextNode(text)); return c; };
+  for (const o of shown) {
+    const row = el('div', 'orow'), who = el('span');
+    const a = el('a', 'pl', o.name); a.href = '#'; a.dataset.id = o.id; a.dataset.team = o.team;
+    who.append(a, el('span', 'meta', ' ' + o.pos + ' · ' + o.team + (o.opp ? ' v ' + o.opp : '') + (o.status ? ' · ' + o.status : '')));
+    const dp = o.d_points;
+    const pts = cell(dp == null ? '' : dp >= 2 ? 'g' : dp <= -2 ? 'rd' : '', 'pts', dp == null ? '-' : (dp > 0 ? '+' : '') + dp.toFixed(1));
+    const sal = cell('', o.d_salary >= 0 ? 'freed' : 'more', '$' + Math.abs(o.d_salary).toLocaleString());
+    const own = cell('own', 'cash own', o.cash_own == null ? '-' : Math.round(o.cash_own * 100) + '%');
+    const b = el('button', 'opt', 'Pick'); b.type = 'button'; b.dataset.key = d.dataset.key; b.dataset.opt = o.id;
+    if (d.dataset.live !== '1') { b.disabled = true; b.title = NOT_SERVED; }
+    row.append(who, pts, sal, own, b); list.append(row);
+  }
+}
+document.addEventListener('toggle', (e) => { const d = e.target; if (d.matches && d.matches('details.other') && d.open) otherDraw(d); }, true);
+document.addEventListener('input', (e) => { const d = e.target.closest && e.target.closest('details.other'); if (d) otherDraw(d); });
+pool.otherDraw = otherDraw;
 pool.decorate = decorate;
 document.addEventListener('click', (e) => { const a = e.target.closest('a.pl:not([data-id])'); if (a) e.preventDefault(); });
 function popClose() { const o = $('#pool-pop'); if (o) o.remove(); }
@@ -754,15 +788,7 @@ function gameOpen(game, team) {
     const add = el('button', 'v', 'Add the ticked as GPP'); add.type = 'button'; add.dataset.act = 'gpp';
     add.disabled = !ps.length || !LIVE || READONLY; if (!LIVE) add.title = NOT_SERVED;
     add.onclick = () => requestPool(ps.map((c) => ({id: c.dataset.id, value: pool.addKind(pool.get(c.dataset.id), 'GPP')})), 'Added as GPP');
-    const more = el('button', 'v', 'Write as a Max exposure stack'); more.type = 'button'; more.dataset.act = 'stack';
-    more.disabled = !ps.some((c) => c.dataset.pos === 'QB') || !LIVE || READONLY;
-    more.title = LIVE ? 'more Name for each on Suggested\'s Max exposure line (GPP builds); needs the QB' : 'The served page writes Suggested\'s Max exposure line';
-    more.onclick = () => window.dfsQueue.run(async () => {
-      let rules = {}; try { rules = JSON.parse(($('#rules-was') || {}).textContent || '{}'); } catch (e) {}
-      try { const r = await window.dfsLive.stack({names: ps.map((c) => c.dataset.name), rules_was: rules}); toast(r.message); }
-      catch (e) { toast(e.message, true); }
-    });
-    act.append(add, more, el('span', 'dim', 'Each row\'s Pool control sets him on its own: Cash, GPP, Both or none.'));
+    act.append(add, el('span', 'dim', 'Each row\'s Pool control sets him on its own: Cash, GPP, Both or none.'));
   }
   actions(); pool.paintAll();
 }

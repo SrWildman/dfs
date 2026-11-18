@@ -418,7 +418,8 @@ def test_urgent_text_for_other_swaps():
 
 
 def ids_in_order(page):
-    ids = re.findall(r'<section class="card[^"]*" id="([a-z-]+)">', page.split('<h2 class="sec">')[1])
+    # the day's folds, in the page's order (the design pass keeps every one; More's views hold them too)
+    ids = re.findall(r'<section class="card fold" id="([a-z-]+)">', page)
     return [i for i in ids if i != "tools"]
 
 
@@ -448,7 +449,7 @@ def test_monday_order_leads_with_the_ledger_then_what_won_and_last_week():
 
 def test_every_lower_section_is_collapsed_with_a_one_line_summary(tmp_path):
     page = render(inputs(tmp_path, slate_rows(), now=SUN))
-    lower = page.split('<h2 class="sec">')[1]
+    lower = page
     for sid in [*week_page.SECTION_IDS, "tools"]:
         sec = re.search(rf'<section class="card fold" id="{sid}"><details>(.*?)</summary>', lower, re.S)
         assert sec, f"{sid} is not collapsed"

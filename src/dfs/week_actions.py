@@ -120,31 +120,6 @@ def start_pool(edits: ww.SheetEdits, inp: WeekInputs) -> dict[str, str]:
     return edits.set_pool(changes, action="starting pool")
 
 
-def more_stack(edits: ww.SheetEdits, inp: WeekInputs, names: list[str], rules_was: dict[str, str]) -> str:
-    """The game view's "write as a Max exposure stack" (Plan N item 10): `more Name` for each ticked player on
-    Max exposure (GPP builds only), the line re-read first (`Conflict` when it changed). Only players on this
-    week's slate, and the stack needs its QB."""
-    slate = wb.slate_names(inp)
-    pos = {str(r.get("Name", "")): str(r.get("Position", "")) for r in inp.edge or []}
-    names = list(dict.fromkeys(str(n) for n in names or [] if str(n).strip()))
-    if not names:
-        raise ww.WriteError("tick a QB and his teammates first")
-    unknown = [n for n in names if n not in pos]
-    if unknown:
-        raise ww.WriteError(f"not on this week's slate: {', '.join(unknown)}")
-    if not any(pos[n] == "QB" for n in names):
-        raise ww.WriteError("a stack starts with its QB: tick him too")
-
-    def add_all(text: str) -> str:
-        for n in names:
-            text = ww.add_item(text, f"more {n}", ww.more_matcher(n, slate))
-        return text
-
-    rules_was = {str(k): str(v) for k, v in (rules_was or {}).items()}
-    edits.edit_rule(MAX_EXPOSURE, rules_was.get(MAX_EXPOSURE, ""), add_all, action="game stack")
-    return f"Max exposure now steers GPP builds to {', '.join(names)}."
-
-
 def _find(inp: WeekInputs, rules: dict[str, str], key: str) -> wb.Decision:
     for d in wb.decisions(inp, rules, answers(inp)):
         if d.key == key:
@@ -204,13 +179,22 @@ def decide_pool(
                 ALWAYS, rules_was.get(ALWAYS, ""), lambda t: ww.remove_items(t, match), action="undo"
             )
             pool, text = _pool_undo(edits, inp, key, rec)
+            if rec.pop(wb.OTHER + key, None) is not None:
+                _save_answers(inp, rec)
             return (
                 f"{name} taken off Always use (cash); {(d.spot or {}).get('slot', 'the spot')} is open again."
                 f"{text}",
                 pool,
             )
         if option not in offered:
-            raise ww.WriteError("pick one of the players the spot offers")
+            from dfs import week_saturday
+
+            default = ((inp.cash_core or {}).get("default")) or {}
+            if week_saturday.fits_spot(inp, d.spot or {}, default, option) is None:
+                raise ww.WriteError(
+                    "he does not fit this spot: the slot's position and the salary the Default leaves"
+                )
+            offered[option] = next(r for r in inp.edge or [] if wb.pid(r) == option)
         name = str(offered[option]["Name"])
         match = ww.scoped_matcher("cash", name, slate)
         edits.edit_rule(
@@ -219,6 +203,10 @@ def decide_pool(
             lambda t: ww.add_item(t, f"cash: {name}", match),
             action="decide",
         )
+        if option not in {wb.pid(c) for c in d.candidates}:
+            # "someone else": remembered (after the write) so the spot shows him as its answer
+            rec[wb.OTHER + key] = option
+            _save_answers(inp, rec)
         pool = _pool_add(edits, inp, key, [option], "Cash", rec)
         slot = (d.spot or {}).get("slot", "the open spot")
         return (
@@ -353,7 +341,9 @@ def decision_record(d: wb.Decision, inp: WeekInputs, *, option: str, pivot: str 
     if d.kind == "spot":
         spot = d.spot or {}
         alts = {str(a.get("name")): a for a in spot.get("alternatives") or []}
-        chosen = next((r for r in d.candidates if wb.pid(r) == option), None)
+        chosen = next((r for r in d.candidates if wb.pid(r) == option), None) or next(
+            (r for r in inp.edge or [] if wb.pid(r) == option), None
+        )  # "someone else": a player from his pool, not one of the cards
         return {
             **base,
             "kind": "open_spot",

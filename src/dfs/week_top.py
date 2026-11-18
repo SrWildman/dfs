@@ -182,9 +182,19 @@ def pool_panel_html(panel: wb.PoolPanel, live: bool, source: str) -> str:
         f"<tr><td>{kind}</td>" + "".join(f"<td>{panel.counts[kind][p]}</td>" for p in POSITIONS) + "</tr>"
         for kind in ("Cash", "GPP")
     )
+    line = (
+        f"{panel.total} player{'s' if panel.total != 1 else ''}: "
+        + " · ".join(f"{p} {panel.counts['Cash'][p]}/{panel.counts['GPP'][p]}" for p in POSITIONS)
+        + " (cash/GPP)"
+        + (f"; {len(panel.questionable)} questionable" if panel.questionable else "")
+        + (f"; {len(panel.out)} OUT" if panel.out else "")
+        if panel.total
+        else "empty: add from the slate, or the suggested starting pool"
+    )
     parts = [
-        f'<section class="card pool" id="pool"><div class="card-head"><h2>Your pool</h2>'
-        f'<span class="asof">{e(source)}</span></div>',
+        f'<section class="card sec pool" id="pool"><details class="dfold"{" open" if not panel.total else ""}>'
+        f'<summary><h2>Your pool</h2><span class="line">{e(line)}</span>'
+        f'<span class="end meta">{e(source)}</span></summary><div class="sec-b">',
         f"<p><b>{panel.total} player{'s' if panel.total != 1 else ''}.</b>"
         + (" Nothing picked yet." if not panel.total else "")
         + "</p>",
@@ -234,7 +244,7 @@ def pool_panel_html(panel: wb.PoolPanel, live: bool, source: str) -> str:
             + say("add X, Y to my pool")
             + ".</p>"
         )
-    parts.append("</section>")
+    parts.append("</div></details></section>")
     return "".join(parts)
 
 
@@ -337,7 +347,7 @@ def decisions_html(
 CASH_CSS = """
 .cashgrid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px;align-items:start;margin:12px 0}
 @media (max-width:900px){.cashgrid{grid-template-columns:1fr}}
-.crow{display:grid;grid-template-columns:40px minmax(0,1fr) 68px 70px 70px 120px;gap:8px;align-items:center;
+.crow{display:grid;grid-template-columns:40px minmax(0,1fr) 68px 64px 70px max-content;gap:8px;align-items:center;
   padding:8px 10px;border-top:1px solid var(--line,#e4e7eb)}
 .crow:first-child{border-top:0}.crow.chead{font-size:11px;color:#8a929c;text-transform:uppercase}
 .crow .posb{font-size:11px;font-weight:650;color:#59626d;background:#eef0f3;border-radius:5px;text-align:center}
@@ -346,7 +356,7 @@ CASH_CSS = """
 .crow .opts{justify-self:end}
 .spots{display:grid;gap:10px}.spot h3{margin:0 0 6px;font-size:13px}.spot h3 span{font-weight:400;color:#6b7480}
 .cands{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}
-@media (max-width:700px){.cands{grid-auto-flow:row}.crow{grid-template-columns:34px minmax(0,1fr) 60px 60px}}
+@media (max-width:700px){.cands{grid-auto-flow:row}.crow{grid-template-columns:34px minmax(0,1fr) 54px max-content}.crow>.num:nth-of-type(3),.crow>.num:nth-of-type(4){display:none}}
 .cand{text-align:left;background:#fff;border:1px solid #d9dde3;border-radius:8px;padding:8px 10px;display:flex;
   flex-direction:column;gap:2px;min-width:0;font:inherit;color:inherit}
 .cand[aria-pressed=true]{border-color:#2457c5;background:#eef3fd}.cand .nm{font-weight:650}
@@ -463,7 +473,9 @@ def _cand_html(c: dict, base: dict, i: int, d: wb.Decision | None, live: bool, o
     )
 
 
-def open_spots_html(core: dict, ds: list[wb.Decision], live: bool) -> str:
+def open_spots_html(
+    core: dict, ds: list[wb.Decision], live: bool, options: dict[str, list[dict]] | None = None
+) -> str:
     """Each open spot: the Default's player and up to two single swaps, as differences against him (points,
     salary freed, cash ownership, status). Colour only at 2+ points, amber at 45%+ owned. A pick writes
     `cash: Name` on Always use and reruns the cash build (`--iterate --only cash`)."""
@@ -489,9 +501,20 @@ def open_spots_html(core: dict, ds: list[wb.Decision], live: bool) -> str:
             if live and d is not None and d.answer and d.undo
             else ""
         )
+        other = ""
+        opts = (options or {}).get(str(s.get("slot", "")))
+        if opts and not (d is not None and d.answer) and d is not None:
+            data = json.dumps(opts, separators=(",", ":")).replace("</", "<\\/")
+            other = (
+                f'<details class="other" data-key="{e(d.key)}" data-live="{1 if live else 0}">'
+                "<summary>Someone else…</summary>"
+                '<input type="search" placeholder="Search your pool" aria-label="Search your pool for this spot">'
+                '<div class="olist"></div>'
+                f'<script type="application/json" class="odata">{data}</script></details>'
+            )
         cards.append(
             f'<div class="card spot"><h3>{e(s.get("slot", ""))} <span>{state}</span>{undo}</h3>'
-            f'<div class="cands">{body}</div></div>'
+            f'<div class="cands">{body}</div>{other}</div>'
         )
     if not cards:
         inner = '<p class="ok">Every near-optimal lineup agrees. Nothing to decide.</p>'
@@ -553,6 +576,34 @@ def cash_lineup_html(core: dict, calibration: dict | None = None) -> str:
         + (f"<p><b>Late-swap order:</b> {e(flex)}</p>" if flex else "")
         + f"{cut}</section>"
     )
+
+
+def cash_main_html(inp: WeekInputs, ds: list[wb.Decision], board: wb.Board, live: bool) -> str:
+    """The Saturday view's cash board and open spots (the lineup card sits in the side column:
+    `cash_lineup_side`). Empty before the first run that saved a Default."""
+    from dfs import week_saturday
+
+    core = inp.cash_core
+    if not core or not (core.get("default") or {}).get("names"):
+        return ""
+    why = {r.name: r.why for r in board.rows()}
+    edge_rows = {str(r.get("Name")): r for r in inp.edge or []}
+    for c in core.get("core") or []:
+        if c.get("name") not in why and c.get("name") in edge_rows:
+            why[c["name"]] = wb.why_facts(edge_rows[c["name"]], wb.game_rank(inp.edge or []))
+    cash = [d for d in ds if d.kind in ("core", "spot")]
+    default = core.get("default") or {}
+    options = {
+        str(sp.get("slot", "")): week_saturday.spot_options(inp, sp, default) for sp in core.get("open") or []
+    }
+    return cash_board_html(core, cash, why, live) + open_spots_html(core, cash, live, options)
+
+
+def cash_lineup_side(inp: WeekInputs) -> str:
+    core = inp.cash_core
+    if not core or not (core.get("default") or {}).get("names"):
+        return ""
+    return cash_lineup_html(core, (inp.numbers or {}).get("cash"))
 
 
 def cash_block_html(inp: WeekInputs, ds: list[wb.Decision], board: wb.Board, live: bool) -> str:
@@ -922,7 +973,6 @@ def game_data(inp: WeekInputs) -> dict:
                     f"{st.get('qb', '')} + {st.get('mates', '')}: Top 1% {_pct1(num(st.get('top1')))}"
                     + (f", lift {lift:.1f}x" if lift is not None else "")
                     + (f", leverage {_pct1(num(st.get('lev')))}" if num(st.get("lev")) is not None else "")
-                    + (f" (type: {st.get('rule')})" if st.get("rule") else "")
                 )
         out[g.key] = {
             "title": title,

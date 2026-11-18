@@ -104,37 +104,26 @@ def test_no_text_cell_can_be_read_by_sheets_as_a_formula():
                     assert cell[0] not in "=+@" and not (cell[0] == "-" and cell != "-"), cell
 
 
-def test_the_cue_is_build_for_the_top_five_by_leverage_that_beat_the_field():
-    """Sam, Plan O item 5: on Week 9 all 20 rows were BUILD, so the cue separated nothing. Now only the five
-    highest-leverage stacks with Lift over 1x and Lev above 0 get it, with a tested or weak signal."""
-    for verdict in ("tested", "weak"):
-        lay = stacks_tab.build_layout(inputs(verdict=verdict))
+def test_no_row_is_cued_and_the_cue_and_rule_columns_stay_blank():
+    """Removal F8 (Sam, 2026-11-17): the Stacks tab is information. No BUILD cue in column A, no pale green
+    row, no "Always use" line in the last column; both columns stay so nothing moves."""
+    for kw in ({"verdict": "tested"}, {"verdict": "weak"}, {"verdict": None}, {"ownership_published": False}):
+        lay = stacks_tab.build_layout(inputs(**kw))
         first, last = stack_rows(lay)
-        cues, levs, lifts = col(lay, "A", first, last), col(lay, "K", first, last), col(lay, "H", first, last)
-        beat = [lev > 0 and lift > 1 for lev, lift in zip(levs, lifts, strict=True)]
-        assert sum(beat) > stacks_tab.BUILD_CUES  # the fixture has more than five that beat the field
-        built = [i for i, c in enumerate(cues) if c == "BUILD"]
-        assert built == [i for i, b in enumerate(beat) if b][: stacks_tab.BUILD_CUES]  # the first five by lev
-        assert levs == sorted(levs, reverse=True)
-        assert set(lay.cue_rows.values()) == {"BUILD"} and len(lay.cue_rows) == stacks_tab.BUILD_CUES
-    for verdict in ("untested", None):
-        lay = stacks_tab.build_layout(inputs(verdict=verdict))
+        assert set(col(lay, "A", first, last)) == {""} and set(col(lay, "M", first, last)) == {""}
         assert not lay.cue_rows
-
-
-def test_a_stack_that_does_not_beat_the_field_is_never_cued_even_in_the_top_five():
-    t = table()
-    t.loc[1, "lift"] = 0.9  # second by leverage, but under 1x
-    lay = stacks_tab.build_layout(inputs(result=stacks.StackResult(table=t, games=games(), meta={})))
-    first, _ = stack_rows(lay)
-    assert col(lay, "A", first, first + 5) == ["BUILD", "", "BUILD", "BUILD", "BUILD", "BUILD"]
+    lay = stacks_tab.build_layout(inputs(verdict="tested"))
+    first, last = stack_rows(lay)
+    levs = col(lay, "K", first, last)
+    assert levs == sorted(levs, reverse=True)  # still in leverage order with a tested signal
+    assert len(stacks_tab.STACK_HEADERS) == 12 and stacks_tab.STACK_HEADERS[-1] == ""
 
 
 def test_the_legend_sits_in_the_header_and_names_every_colour():
     lay = stacks_tab.build_layout(inputs())
     assert lay.legend_row == 3  # under the title and status, frozen with them
     legend = lay.rows[lay.legend_row - 1][0]
-    assert legend.startswith("COLOURS") and "Green row, BUILD" in legend and "5 highest-leverage" in legend
+    assert legend.startswith("COLOURS") and "nothing here is a pick" in legend and "BUILD" not in legend
     assert "Top 1%, Lift and Lev are shaded" in legend and "Nothing else is coloured" in legend
     first, last = stack_rows(lay)
     assert lay.scales == [
@@ -144,18 +133,9 @@ def test_the_legend_sits_in_the_header_and_names_every_colour():
     ]
     assert lay.table_width == "M"
     unpublished = stacks_tab.build_layout(inputs(ownership_published=False))
-    assert "No BUILD cue until TFFB publishes ownership" in unpublished.rows[2][0]
+    assert "wait for TFFB's ownership" in unpublished.rows[2][0]
     assert [k for _, k in unpublished.scales] == ["gradient", "gradient"]  # Lev is all dashes
     assert "untested" in stacks_tab.build_layout(inputs(verdict=None)).rows[2][0]
-
-
-def test_the_last_cell_is_the_line_to_type_into_the_rules_box():
-    lay = stacks_tab.build_layout(inputs())
-    first, _ = stack_rows(lay)
-    assert col(lay, "M", first, first) == ["Always use: QB 0, WR 0, TE 0"]
-    assert (
-        stacks_tab.rule_text("Matthew Stafford", "Puka Nacua") == "Always use: Matthew Stafford, Puka Nacua"
-    )
 
 
 def test_the_header_names_how_far_the_leverage_signal_can_be_trusted():

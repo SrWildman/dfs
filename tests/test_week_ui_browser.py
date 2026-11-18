@@ -293,7 +293,7 @@ def test_the_explorer_chart_follows_the_lens_and_the_filters(page):
     assert page.evaluate("window.dfsViewer.V.spec.points.length") == wrs  # full screen: the same points
 
 
-def test_the_game_view_adds_the_ticked_as_gpp_and_writes_a_more_stack(page, served):
+def test_the_game_view_adds_the_ticked_as_gpp(page, served):
     page.locator('#games .game[data-game="2026_09_DAL_IND"]').click()
     page.wait_for_selector("#gameview input.sel")
     assert page.locator("#gameview h3").all_inner_texts()[0].startswith("DAL")
@@ -302,23 +302,22 @@ def test_the_game_view_adds_the_ticked_as_gpp_and_writes_a_more_stack(page, serv
     page.locator("#gameview button[data-act=gpp]").click()
     settle(page)
     assert [served.pool(n) for n in ("Qb Alpha", "Wr Value", "Te Fade")] == ["GPP", "GPP", "GPP"]
-    page.locator("#gameview button[data-act=stack]").click()
-    settle(page)
-    assert served.sheet.get(ss.TAB, 4, ss.NAME_INDEX) == "more Qb Alpha, more Wr Value, more Te Fade"
+    assert page.locator("#gameview button[data-act=stack]").count() == 0  # Removal F7
     page.keyboard.press("Escape")
     page.locator('#board a.tm[data-team="IND"]').first.click()  # an Opp cell opens the same game
     assert page.locator("#gameview").is_visible()
 
 
-def test_the_chat_toggle_is_remembered_across_a_reload(page):
-    assert not page.evaluate("document.querySelector('#chat').classList.contains('collapsed')")
-    page.locator("#chat-toggle").click()
-    assert page.evaluate("document.body.classList.contains('chat-closed')")
+def test_the_chat_starts_folded_and_ask_claude_opens_it(page):
+    """Sam, 2026-11-17: the chat is collapsed by default everywhere and never opens by itself."""
+    folded = "document.querySelector('#chat').classList.contains('collapsed')"
+    assert page.evaluate(folded) and page.evaluate("document.body.classList.contains('chat-closed')")
+    assert not page.locator("#chat").is_visible()  # no rail: the header's Ask Claude is the way in
+    page.locator("#ask-open").click()
+    assert not page.evaluate(folded) and page.locator("#chat").is_visible()
     page.reload()
     until(page, "!!window.dfsLive")
-    assert page.evaluate("document.querySelector('#chat').classList.contains('collapsed')")
-    page.locator("#chat").click()
-    assert not page.evaluate("document.querySelector('#chat').classList.contains('collapsed')")
+    assert page.evaluate(folded)  # opened once is not opened for good
 
 
 def test_a_pool_click_keeps_the_board_box_and_page_scroll_and_the_focus(browser, served):
@@ -328,7 +327,7 @@ def test_a_pool_click_keeps_the_board_box_and_page_scroll_and_the_focus(browser,
         viewport={"width": 1440, "height": 420}
     )  # a short window: the board box scrolls
     pg = ctx.new_page()
-    pg.goto(served.url + "#explore")
+    pg.goto(served.url + "#players")
     until(pg, "!!(window.dfsPool && window.dfsLive)")
     box = "document.querySelector('#board .scroll.tall')"
     pg.evaluate(f"({box}).scrollIntoView({{block: 'start'}})")
@@ -403,9 +402,7 @@ def test_the_run_panel_is_the_weekly_buttons_curated_forms_and_recent_runs(page)
     first = page.locator("#run-history li").first
     assert first.locator(".st").inner_text() == "ok" and "dfs sync --live" in first.inner_text()
     assert re.search(r"\d+s", first.locator(".t").inner_text())
-    page.evaluate("document.querySelector('#run-out').textContent = ''")
-    first.locator("a", has_text="output").click()
-    until(page, "document.querySelector('#run-out').textContent.includes('second line')")
+    assert first.locator("a", has_text="output").count() == 0  # Removal F7: no job-output viewer
 
 
 def test_every_name_carries_the_pool_chip_and_a_missing_player_is_one_click_away(page, served):
@@ -418,8 +415,10 @@ def test_every_name_carries_the_pool_chip_and_a_missing_player_is_one_click_away
           .filter(a => {
             const id = a.dataset.id, row = a.closest('tr, li, .gp-row');
             const hasSeg = row && row.querySelector('.seg[data-id="' + CSS.escape(id) + '"]');
-            const next = a.nextElementSibling;
-            return !hasSeg && !(next && next.classList.contains('pchip'));
+            // the square sits before the name (and its position label)
+            const p = a.previousElementSibling;
+            const q = p && p.classList.contains('posl') ? p.previousElementSibling : p;
+            return !hasSeg && !(q && q.classList.contains('pchip'));
           }).map(a => a.textContent)"""
     )
     assert bare == []
@@ -432,7 +431,7 @@ def test_every_name_carries_the_pool_chip_and_a_missing_player_is_one_click_away
     page.locator("#pool-pop .seg button[data-v=GPP]").click()
     read_back(page, pid, "GPP")
     assert served.pool(name) == "GPP"
-    until(page, f"document.querySelector('.pchip[data-id=\"{pid}\"]').textContent === 'GPP'")
+    until(page, f"document.querySelector('.pchip[data-id=\"{pid}\"]').dataset.pool === 'GPP'")
     page.keyboard.press("Escape")
     assert page.locator("#pool-pop").count() == 0
     add = page.locator("button.addpool:visible").first
@@ -628,9 +627,9 @@ def visible_views(pg):
     return pg.evaluate("[...document.querySelectorAll('.vw')].filter(w => !w.hidden).map(w => w.dataset.v)")
 
 
-def test_the_page_opens_on_the_overview_each_view_has_its_hash_and_the_last_one_is_kept(browser, served):
-    """Sam, 2026-11-09: a view bar under the brief, Overview the default, each view its own #name (a link
-    and the back button open it), the last one kept per week."""
+def test_the_page_opens_on_the_clocks_day_every_view_has_its_hash_and_the_last_one_is_kept(browser, served):
+    """The design pass (Sam, 2026-11-17): three day tabs in the header, every other view on the More bar, the
+    clock only picks which day opens first; each view its own #name, the last one kept per week."""
     ctx = browser.new_context(viewport={"width": 1440, "height": 1000})
     pg = ctx.new_page()
     pg.goto(served.url)
@@ -638,34 +637,49 @@ def test_the_page_opens_on_the_overview_each_view_has_its_hash_and_the_last_one_
     # blueprint C2 / D: the page opens on the clock's state; this fixture's slate is over, so the Close view
     assert pg.evaluate("document.body.dataset.state") == "close"
     assert pg.evaluate("window.dfsViews.current()") == "close"
-    assert pg.locator("#close-card").is_visible() and not pg.locator("#overview-card").is_visible()
+    assert pg.locator("#close-card").is_visible() and pg.locator("#status-close").is_visible()
+    assert not pg.locator("#overview-card").is_visible() and not pg.locator("#status-build").is_visible()
+    # every day is reachable any day
     pg.click('#views a[data-view="build"]')
     until(pg, "window.dfsViews.current() === 'build'")
-    assert pg.locator("#brief").is_visible() and pg.locator("#progress").is_visible()
-    assert pg.locator("#strip").is_visible()
-    assert pg.locator("#overview-card").is_visible() and not pg.locator("#board").is_visible()
-    pg.click('#views a[data-view="usage"]')
+    assert pg.locator("#status-build").is_visible() and pg.locator("#progress").is_visible()
+    assert pg.locator("#digest").is_visible() and not pg.locator("#board").is_visible()
+    pg.click('#views a[data-view="lock"]')
+    until(pg, "window.dfsViews.current() === 'lock'")
+    assert pg.locator("#lock-card").is_visible() and pg.locator("#status-lock").is_visible()
+    # More keeps every view the page had
+    pg.click('#more a[data-view="usage"]')
     until(pg, "location.hash === '#usage' && window.dfsViews.current() === 'usage'")
-    assert pg.locator("#usage-card").is_visible() and not pg.locator("#overview-card").is_visible()
-    assert pg.locator("#brief").is_visible()  # the brief is on every view
-    pg.click('#views a[data-view="model"]')
+    assert pg.locator("#usage-card").is_visible() and not pg.locator("#digest").is_visible()
+    pg.click('#more a[data-view="overview"]')
+    until(pg, "window.dfsViews.current() === 'overview'")
+    assert pg.locator("#overview-card").is_visible() and pg.locator("#brief").is_visible()
+    pg.click('#more a[data-view="model"]')
     until(pg, "window.dfsViews.current() === 'model'")
     pg.go_back()
-    until(pg, "window.dfsViews.current() === 'usage'")
+    until(pg, "window.dfsViews.current() === 'overview'")
     pg.goto(served.url)  # no hash: the last view this week
     until(pg, "!!window.dfsViews")
-    assert pg.evaluate("window.dfsViews.current()") == "usage"
+    assert pg.evaluate("window.dfsViews.current()") == "overview"
     pg.goto(served.url + "#everything")
     until(pg, "window.dfsViews.current() === 'everything'")
-    for sid in ("#board", "#usage-card", "#injury-card", "#model-card", "#explorer-card"):
-        assert pg.locator(sid).count() == 1 and pg.locator(sid).is_visible(), sid
+    for sid in (
+        "#board",
+        "#usage-card",
+        "#injury-card",
+        "#model-card",
+        "#explorer-card",
+        "#digest",
+        "#chalk-off",
+    ):
+        assert pg.locator(sid).count() <= 1, sid
+    for sid in ("#board", "#usage-card", "#injury-card", "#model-card", "#explorer-card", "#digest"):
+        assert pg.locator(sid).is_visible(), sid
     # a link to a section on another view opens a view that has it
     pg.goto(served.url + "#explore")
     until(pg, "window.dfsViews.current() === 'explore'")
     pg.evaluate("location.hash = 'numbers'")
-    until(pg, "window.dfsViews.current() === 'build'")
-    pg.evaluate("location.hash = 'overview'")  # an old link to the Overview opens the Saturday view
-    until(pg, "window.dfsViews.current() === 'build'")
+    until(pg, "window.dfsViews.current() === 'lastweek'")
     ctx.close()
 
 
@@ -682,13 +696,15 @@ def test_every_name_on_the_new_views_carries_the_pool_chip_and_one_store(browser
     until(pg, "document.querySelectorAll('#uv-teams .bars span.pl').length > 0")
     # a name the page resolves (every priced player but OUT / IR, the Explorer's set) carries the chip
     bare = """sel => [...document.querySelectorAll(sel + ' a.pl[data-id]')].filter(a => {
-        const n = a.nextElementSibling; return !(n && n.classList.contains('pchip'));
+        const p = a.previousElementSibling;
+        const q = p && p.classList.contains('posl') ? p.previousElementSibling : p;
+        return !(q && q.classList.contains('pchip'));
       }).map(a => a.textContent)"""
     plain = "sel => [...document.querySelectorAll(sel + ' a.pl:not([data-id])')].map(a => a.textContent)"
     out = {r["Name"] for r in served.rows if r.get("Avail") in ("OUT", "IR")}
     for view, sel in (
         ("usage", "#usage-card"),
-        ("build", "#overview-card"),
+        ("overview", "#overview-card"),
         ("injuries", "#injury-card"),
         ("model", "#model-card"),
     ):
@@ -698,7 +714,7 @@ def test_every_name_on_the_new_views_carries_the_pool_chip_and_one_store(browser
         assert pg.evaluate(bare, sel) == [], view
         assert set(pg.evaluate(plain, sel)) <= out, view
     # one store: a pool write on the overview shows on the usage view's chip
-    pg.evaluate("location.hash = 'build'")
+    pg.evaluate("location.hash = 'overview'")
     chip = pg.locator("#overview-card .pchip").first
     pid = chip.get_attribute("data-id")
     chip.click()
@@ -708,7 +724,7 @@ def test_every_name_on_the_new_views_carries_the_pool_chip_and_one_store(browser
     pg.evaluate("location.hash = 'everything'")
     until(
         pg,
-        f"[...document.querySelectorAll('.pchip[data-id=\"{pid}\"]')].every(c => c.textContent === 'Cash')",
+        f"[...document.querySelectorAll('.pchip[data-id=\"{pid}\"]')].every(c => c.dataset.pool === 'Cash')",
     )
     assert errors == []
     ctx.close()
@@ -750,7 +766,7 @@ def test_search_finds_a_player_on_any_view_and_the_compare_tray_holds_two_to_fou
     until(page, "!!window.dfsCompare")
     assert len(page.evaluate("window.dfsCompare.picks()")) == 4
     # from any name: the pool chip's popover has + Compare
-    page.locator(".pchip").first.click()
+    page.locator(".pchip:visible").first.click()
     assert page.locator("#pool-pop button.cmp-add").count() == 1
 
 
@@ -804,7 +820,7 @@ def test_the_sunday_view_opens_by_itself_and_swap_records_without_a_sheet_write(
         until(pg, "!!(window.dfsPool && window.dfsLive)")
         assert pg.evaluate("document.body.dataset.state") == "lock"
         assert pg.evaluate("window.dfsViews.current()") == "lock"
-        assert pg.locator("#lock-card").is_visible() and pg.locator("#strip").is_visible()
+        assert pg.locator("#lock-card").is_visible() and pg.locator("#status-lock").is_visible()
         swap = pg.locator('#lock-card button.lockbtn[data-action="swap"]').first
         assert swap.is_enabled()
         swap.click()
