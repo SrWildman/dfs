@@ -47,43 +47,85 @@ POSITIONS = week_plays.POSITIONS
 SKILL = ("QB", "RB", "WR", "TE")
 
 VIEWS = (
-    # blueprint Phase C2: the three states the clock chooses (`lock_state.state`), ahead of the six
+    # the three day views (design pass): any one is reachable on any day; the clock (`lock_state.state`) picks
+    # which one opens first
     ("build", "Saturday"),
     ("lock", "Sunday"),
-    ("close", "Tuesday"),  # blueprint Phase D: the Close view
-    ("explore", "Board & Explorer"),
+    ("close", "Tuesday"),
+    # More (`week_shell.MORE`): every section the page has, one click away
+    ("players", "Board"),
+    ("explore", "Explorer"),
+    ("slate", "Games"),
     ("usage", "Usage"),
     ("injuries", "Injuries"),
     ("model", "Model vs sources"),
+    ("overview", "Overview"),
+    ("builds", "Builds"),
+    ("gameday", "Game day"),
+    ("money", "Ledger and plan"),
+    ("lastweek", "Last week"),
+    ("seasonlong", "Season-long"),
+    ("run", "Run a command"),
     ("everything", "Everything"),
 )
 DEFAULT_VIEW = "build"  # the static default; the page opens on the clock's state (`body[data-state]`)
 VIEW_NAMES = tuple(k for k, _ in VIEWS)
-ALIASES = {"overview": "build"}  # the old Overview view's links open the Saturday view, which holds it
-# Which views each block of the page shows on (the strip and the brief show on all of them).
+# Which views each block of the page shows on.
 PLACES = {
-    "pool": "explore everything",
-    "decisions": "build explore everything",  # Phase A's cash board: the Saturday view
-    "board": "explore everything",
-    "charts": "explore everything",
-    "games": "explore everything",
+    "status-build": "build",
+    "status-lock": "lock",
+    "status-close": "close",
+    "chalk": "build everything",
+    "decisions": "build everything",  # Phase A's cash board, the open spots, the other calls
+    "digest": "build slate everything",
+    "fades": "build everything",
+    "pool": "build everything",
+    "side-build": "build everything",  # the cash lineup card
+    "side": "build lock close everything",  # This week and the drop zone
+    "board": "players everything",
+    "charts": "players everything",
+    "games": "slate everything",
     "explorer": "explore everything",
-    "overview": "build",
+    "overview": "overview everything",
     "lock": "lock everything",
     "close": "close everything",
     "usage": "usage everything",
     "injuries": "injuries everything",
     "model": "model everything",
-    # the rest of the week (the folds): under the Saturday view ("the full sections sit below")
-    "rest": "build everything",
-    # the run panel and the tools: Saturday and Sunday (late swap and the live sync run from here)
-    "runs": "build lock close everything",
+    "runs": "run everything",
+}
+# The rest of the week's sections (`week_page.FOLD_IDS`): the More view each one lives in, and the day view
+# that also shows it.
+FOLD_PLACES = {
+    "ledger": "money",
+    "contest-plan": "money",
+    "entry-plan": "money",
+    "bankroll": "money",
+    "consensus": "gameday",
+    "changes": "gameday",
+    "inactives": "lock gameday",
+    "sunday": "lock gameday",
+    "cash": "build builds",
+    "gpp": "build builds",
+    "field-review": "close lastweek",
+    "last-week": "lastweek",
+    "exposure": "lastweek",
+    "salaries": "lastweek",
+    "numbers": "lastweek",
+    "season": "seasonlong",
 }
 
 
 def wrap(html: str, place: str) -> str:
-    """`html` shown only on the views `PLACES[place]` names (every view without the page's script)."""
-    return f'<div class="vw" data-v="{e(PLACES[place])}">{html}</div>'
+    """`html` shown only on the views `PLACES[place]` names (every view without the page's script); `place`
+    may also be the views themselves, space separated."""
+    views = PLACES.get(place) or place
+    return f'<div class="vw" data-v="{e(views)}">{html}</div>'
+
+
+def fold_views(sid: str) -> str:
+    """The views a fold of the rest of the week shows on."""
+    return f"{FOLD_PLACES.get(sid, '')} everything".strip()
 
 
 def view_bar(default: str = DEFAULT_VIEW) -> str:
@@ -569,13 +611,12 @@ MODEL_HOW = (
 CALLS_HOW = (
     "The plays model's calls (Shadow: not proven). Until the M1.6 labels clear the bar, a cash AVOID on a 30%+ "
     'CashOwn player and any label its own reason contradicts read "no call: label under review". '
-    "Cash CORE / PLAY / AVOID from the sim's Cash % for the "
-    "price; GPP TARGET / LEVERAGE / FADE from the simulated top-1% share against GppOwn. A hit: CORE / PLAY "
-    "at or above his position's median points per $1K, AVOID below it; TARGET / LEVERAGE a real top-1% share "
-    "above his real ownership, FADE not. The backtest is M1's walk-forward rerun of Weeks 2 and 4-8; the live "
-    "record starts at the Week 9 close and is never mixed with it."
+    "Cash AVOID: the bottom 30% by the sim's Cash % for the price within the position; GPP FADE: the "
+    "simulated top-1% share against GppOwn. A hit: AVOID below his position's median points per $1K; FADE "
+    "a real top-1% share under his real ownership. Only the fades are shown (the play labels were taken off "
+    "the page). The backtest is M1's walk-forward rerun of Weeks 2 and 4-8; the live record starts at the "
+    "Week 9 close and is never mixed with it."
 )
-CASH_LABELS, GPP_LABELS = ("CORE", "PLAY", "AVOID"), ("TARGET", "LEVERAGE", "FADE")
 
 
 @dataclass
@@ -780,16 +821,11 @@ def model_section(inp) -> str:
         )
     if calls_of(inp):
         label, why = TRUST["plays_shadow"]
+        # Removal F8 (Sam, 2026-11-17): only the fades stay; CORE / PLAY / TARGET / LEVERAGE are not shown
         lead = "".join(_calls_block(inp, k, lab, record) for k, lab in (("cash", "AVOID"), ("gpp", "FADE")))
-        rest = "".join(
-            _calls_block(inp, k, lab, record, limit=8)
-            for k, labs in (("cash", ("CORE", "PLAY")), ("gpp", ("TARGET", "LEVERAGE")))
-            for lab in labs
-        )
         calls_html = (
             f'<h3>The plays calls {chip_html(label, why)} <span class="dim">as of {e(calls_at(inp))}</span></h3>'
-            f"{how_html(CALLS_HOW)}<p><b>Who not to play first.</b></p>{lead}"
-            f'<details class="calls-rest"><summary>Who to play: CORE, PLAY, TARGET, LEVERAGE</summary>{rest}</details>'
+            f"{how_html(CALLS_HOW)}<p><b>Who not to play.</b></p>{lead}"
             f"{caption(CALLS_HOW, ('calls', 'plays-summary.json', 'calls_history.csv'))}"
         )
     else:
@@ -1031,7 +1067,7 @@ def compare_spec() -> list[dict]:
     return out
 
 
-NEWS_AT = "#board, #decisions, #overview-card table.ov, #model-card table.calls, #injury-card"
+NEWS_AT = "#board, #decisions, #cash-board, #chalk-off, #digest, #fades, #overview-card table.ov, #model-card table.calls, #injury-card"
 NEWS_NOTE = (
     "Team news (facts, not a model): the QB each pass catcher catches from when the starter is out, a pass "
     "catcher or lead back who is out (his share of the team's targets or snaps over his last five games), and "
@@ -1112,12 +1148,7 @@ ul.noact{list-style:none;padding:0;margin:6px 0}ul.noact li{padding:5px 0;border
 .chk.bad{background:var(--flag)}.chk.bad b,.chk.bad .mk{color:var(--warn)}
 table.late th{text-align:left;padding-top:10px}h3.sub{font-size:13px;text-transform:uppercase;letter-spacing:.04em;
 margin:18px 0 6px}h3.sub .dim{text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px}
-#views{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:10px 0 12px;position:sticky;top:0;z-index:12;
-  background:var(--bg);padding:6px 0;border-bottom:1px solid var(--line)}
-#views a{padding:5px 11px;border-radius:999px;border:1px solid var(--line);color:inherit;text-decoration:none;
-  font-size:13px;background:var(--card)}
-#views a.on{background:var(--ink,#1f2937);color:var(--bg,#fff);border-color:transparent;font-weight:600}
-.vsearch{margin-left:auto;position:relative}
+.vsearch{position:relative}
 #psearch{width:220px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13px;
   background:var(--card);color:inherit}
 .srlist{position:absolute;right:0;top:32px;width:340px;max-height:60vh;overflow:auto;background:var(--card);
@@ -1204,6 +1235,7 @@ function newsChips(id, full) {
 function idOf(a) {
   if (a.dataset.id) return a.dataset.id;
   const n = a.nextElementSibling; if (n && n.classList.contains('pchip')) return n.dataset.id;
+  const p = a.previousElementSibling; if (p && p.classList.contains('pchip')) return p.dataset.id;
   const tr = a.closest('tr[data-id]'); return tr ? tr.dataset.id : '';
 }
 function paintNews(root) {
@@ -1219,8 +1251,8 @@ function paintNews(root) {
 window.dfsNews = { get: newsOf, chips: newsChips, paint: paintNews, note: NEWS.note || '' };
 
 /* ---------- the view bar: each view its own #name, the last one kept per week ---------- */
-const NAMES = $$('#views a[data-view]').map((a) => a.dataset.view);
-const ALIAS = {overview: 'build'};   // old links to the Overview open the Saturday view
+const NAMES = [...new Set($$('#views a[data-view], #more a[data-view]').map((a) => a.dataset.view))];
+const ALIAS = {};
 const STATE = document.body.dataset.state || NAMES[0];   // the clock's state (`lock_state.state`)
 const VKEY = 'dfs-view-' + WEEK + '-' + STATE;   // Saturday's choice never hides Sunday's page
 let current = null;
@@ -1229,7 +1261,7 @@ function show(v) {
   const changed = v !== current; current = v;
   document.body.dataset.view = v;
   for (const w of $$('.vw')) w.hidden = !w.dataset.v.split(' ').includes(v);
-  for (const a of $$('#views a[data-view]')) { const on = a.dataset.view === v; a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
+  for (const a of $$('#views a[data-view], #more a[data-view]')) { const on = a.dataset.view === v; a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
   store.set(VKEY, v);
   if (changed) { drawVisible(); window.dispatchEvent(new CustomEvent('dfs-view', {detail: v})); }
 }

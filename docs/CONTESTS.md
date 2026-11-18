@@ -291,8 +291,8 @@ One reading to know: Tier B takes up to **3** entries a user and the Avoid bucke
 1,000-2,500 entrants is B and a 20-max of the same size is Avoid.
 
 **Where it shows:** the Week page's contest-plan section (the plan in dollars, what to look for, the day's reminder),
-and on `dfs week serve` a five-field **check this contest** form and a drop zone whose entries file is tiered against
-the plan before lock; `dfs contests plan` adds the tier view after the format view; `dfs week close` prints one line
+and on `dfs week serve` a drop zone whose entries file is tiered against the plan before lock (the five-field check
+form was removed in the design pass, Removal F7); `dfs contests plan` adds the tier view after the format view; `dfs week close` prints one line
 (planned against spent by tier) and leaves it for the page's "Last week". An entries file does not give a contest's
 field or prize pool, so those come from the same series' median in the log (a flag when there is none).
 

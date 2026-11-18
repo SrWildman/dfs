@@ -443,7 +443,7 @@ def decisions(
     parsed = parsed_rules(inp, rules)
     out: list[Decision] = []
     cash_names = cash_decision_names(inp)
-    out.extend(cash_decisions(inp, parsed))
+    out.extend(cash_decisions(inp, parsed, answers))
     for r in [r for r in chalk_rows(inp) if r["Name"] not in cash_names][:chalk_max]:
         name = r["Name"]
         d = Decision(
@@ -534,7 +534,10 @@ def _cash_answer(d: Decision, parsed, name: str) -> None:  # noqa: ANN001
         d.answer, d.answer_text = "fade", "Fade: on Never use (every build, typed in the sheet)"
 
 
-def cash_decisions(inp: WeekInputs, parsed) -> list[Decision]:  # noqa: ANN001
+OTHER = "other:"  # the decisions file's key for an open spot's "someone else" pick (`other:spot:FLEX` -> Id)
+
+
+def cash_decisions(inp: WeekInputs, parsed, answers: dict | None = None) -> list[Decision]:  # noqa: ANN001
     """The Default cash lineup's choices (blueprint Phase A), from the `cash_core` input: each core player
     (Play / Fade, the chalk decision's answers: `cash: Name` on Always use / Never use), each faded one (his
     Fade, with its undo) and each open spot (one option per candidate: his `cash: Name` on Always use).
@@ -556,11 +559,16 @@ def cash_decisions(inp: WeekInputs, parsed) -> list[Decision]:  # noqa: ANN001
         )
         _cash_answer(d, parsed, name)
         out.append(d)
+    by_id = {pid(r): r for r in inp.edge or []}
     for s in cc.get("open") or []:
         offered = [s.get("default") or {}, *(s.get("alternatives") or [])]
         cands = [rows[str(c.get("name"))] for c in offered if str(c.get("name")) in rows]
         if not cands:
             continue
+        picked = str((answers or {}).get(f"{OTHER}spot:{s.get('slot', '')}") or "")
+        other = by_id.get(picked) if picked else None
+        if other is not None and other not in cands:
+            cands.append(other)  # "someone else" (the design pass): picked from his pool, not a card
         d = Decision(
             f"spot:{s.get('slot', '')}",
             "spot",

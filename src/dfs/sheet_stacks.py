@@ -39,7 +39,6 @@ COLUMN_PX = {
     "L": 70,
     "M": 330,
 }
-CUE_COLORS = {stacks_tab.CUE_BUILD: ("#FFFFFF", "#15704A")}  # (text colour, fill)
 
 
 class StacksUnavailable(Exception):
@@ -111,7 +110,7 @@ def write_stacks(client: SheetsClient, layout: Layout, tab: str = STACKS_TAB) ->
     """Write the rows, then style them. The tab is reset first (it is rebuilt from scratch every time)."""
     from dfs import week_inputs
     from dfs.sheet_color_scales import _DIVERGING, _GRADIENT, _scale_rule_specs
-    from dfs.sheet_style import _HEADER_FMT, _PANEL_FMT, _SOFT_OK_BG, _TITLE_FMT, INK, INK_MUTED, WHITE, _num
+    from dfs.sheet_style import _HEADER_FMT, _PANEL_FMT, _TITLE_FMT, INK, INK_MUTED, WHITE, _num
 
     last = max(len(layout.rows) + 5, 60)
     client.write_tab(tab, layout.rows)
@@ -149,19 +148,6 @@ def write_stacks(client: SheetsClient, layout: Layout, tab: str = STACKS_TAB) ->
             {
                 "textFormat": {"bold": True, "fontSize": 9, "foregroundColor": INK},
                 "wrapStrategy": "OVERFLOW_CELL",
-            },
-        )
-    for row in layout.cue_rows:  # a BUILD row: tinted pale green across the table (the cue cell is set below)
-        client.format_range(tab, f"A{row}:{layout.table_width}{row}", {"backgroundColor": _SOFT_OK_BG})
-    for row, cue in layout.cue_rows.items():
-        text_color, fill = CUE_COLORS[cue]
-        client.format_range(
-            tab,
-            f"A{row}",
-            {
-                "textFormat": {"bold": True, "fontSize": 9, "foregroundColor": _rgb(text_color)},
-                "horizontalAlignment": "CENTER",
-                "backgroundColor": _rgb(fill),
             },
         )
     for rng, pattern, kind in layout.formats:

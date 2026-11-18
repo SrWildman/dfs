@@ -29,7 +29,7 @@ from test_entries import (
     write_entries_file,
 )
 
-from dfs import run_lock, week_chat, week_drops, week_jobs, week_live, week_page, week_server
+from dfs import run_lock, week_chat, week_drops, week_inputs, week_jobs, week_live, week_page, week_server
 from dfs.week_server import make_server
 
 SEASON, WEEK = 2026, 7
@@ -300,7 +300,7 @@ def test_a_post_from_another_origin_or_without_json_is_refused(make):
     c = make()
     assert c.post("/api/chat/stop", headers={"Origin": "https://evil.example.com"})[0] == 403
     assert c.post("/api/chat/stop", headers={"Sec-Fetch-Site": "cross-site"})[0] == 403
-    status, _, _ = c.request("POST", "/api/check", body=b"format=GPP", headers={"Content-Type": "text/plain"})
+    status, _, _ = c.request("POST", "/api/pool", body=b"id=1", headers={"Content-Type": "text/plain"})
     assert status == 415
     # the page's own origin is fine (it gets past the checks to the route's own answer)
     own = {"Origin": f"http://127.0.0.1:{c.port}"}
@@ -309,7 +309,7 @@ def test_a_post_from_another_origin_or_without_json_is_refused(make):
 
 def test_a_preflight_is_never_answered(make):
     c = make()
-    assert c.request("OPTIONS", "/api/check")[0] == 403
+    assert c.request("OPTIONS", "/api/pool")[0] == 403
 
 
 def test_unknown_paths_404_after_the_token_check(make):
@@ -346,7 +346,11 @@ def test_the_live_page_adds_ask_buttons_the_chat_and_the_run_card(make):
     c = make()
     _, page = c.get("/")
     assert 'id="chat"' in page and "Claude Code</b> on your Mac, in <code>dfs/</code>" in page
-    assert 'id="live-run"' in page and 'id="live-contest"' in page and 'id="check-form"' in page
+    assert 'id="live-run"' in page and 'id="live-drop"' in page and 'id="dropzone"' in page
+    # Removal F7: the contest check form, the budget box and the job-output viewer are gone; the drop zone
+    # stays
+    assert 'id="check-form"' not in page and 'id="budget-form"' not in page and "showOutput" not in page
+    assert 'id="ask-open"' in page and "chatFold(true, false)" in page  # the chat starts folded, Ask opens it
     assert "<!--live:" not in page  # both markers were replaced
     assert page.count('class="ask"') >= 3  # Today's steps and the tools list
     assert 'data-say="close the week"' in page or 'data-say="sync"' in page
@@ -357,7 +361,7 @@ def test_the_static_page_has_no_live_parts():
     html = week_page.render(
         week_page.gather(SEASON, WEEK, datetime(2026, 11, 7, 10).astimezone()), registered=set(), tools=[]
     )
-    assert "<aside" not in html and 'class="ask"' not in html and 'id="chat"' not in html
+    assert 'class="ask"' not in html and 'id="chat"' not in html and 'id="ask-open"' not in html
     assert "/api/" not in html and "dfs-token" not in html  # the Explorer's inline script is not a live part
 
 
@@ -954,57 +958,6 @@ def test_arguments_are_checked_against_the_command(make):
     assert c.post("/api/jobs/start", {"command": "dfs sync", "values": {"only": "a\nb"}})[0] == 400
 
 
-# -- the contest check ---------------------------------------------------------------------------------------
-
-
-def test_the_check_form_returns_a_tier_a_rake_and_a_reason(make):
-    c = make()
-    status, body = c.post(
-        "/api/check",
-        {"format": "GPP", "fee": "15", "entrants": "400 / 784", "entry_max": "3", "prize": "10000 2x"},
-    )
-    assert status == 200 and body["tier"] == "B" and body["rake"] == pytest.approx(1 - 10000 / (784 * 15))
-    assert body["reason"].startswith("3-max GPP") and any("overlay possible" in f for f in body["flags"])
-    avoid = c.post("/api/check", {"format": "GPP", "fee": "8", "entrants": "2941", "entry_max": "5"})[1]
-    assert avoid["tier"] == "Avoid" and "worst bucket" in avoid["reason"]
-    assert c.post("/api/check", {"format": "GPP"})[0] == 400
-
-
-def test_the_check_form_looks_up_an_h2h_opponent(make, tmp_path):
-    import pandas as pd
-
-    from dfs import paths
-
-    paths.CONTESTS_DIR.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(
-        {
-            "opponent": ["coletrain3193", "azabern2"],
-            "meetings": [7, 7],
-            "wins": [1, 4],
-            "losses": [6, 3],
-            "ties": [0, 0],
-            "net": [-7.4, 0.6],
-        }
-    ).to_csv(paths.CONTESTS_DIR / "h2h_opponents.csv", index=False)
-    c = make()
-    regular = c.post("/api/check", {"format": "H2H", "fee": "2", "opponent": "ColeTrain3193"})[1]
-    assert regular["tier"] == "Avoid" and regular["opponent_record"] == "1-6 over 7 games"
-    fine = c.post("/api/check", {"format": "H2H", "fee": "2", "opponent": "azabern2"})[1]
-    assert fine["tier"] == "A" and fine["opponent_record"] == "4-3 over 7 games"
-    unknown = c.post("/api/check", {"format": "H2H", "fee": "2", "opponent": "new guy"})[1]
-    assert unknown["tier"] == "A" and unknown["opponent_record"] == ""
-
-
-def test_the_budget_is_saved_for_the_week_and_the_plan_uses_it(make):
-    c = make()
-    assert "No Weekly Budget yet" in c.get("/")[1]
-    assert c.post("/api/budget", {"budget": "$100"})[1] == {"budget": 100.0}
-    page = c.get("/")[1]
-    assert "Weekly Budget $100" in page and "$60" in page and "$30" in page and "$10" in page
-    assert c.post("/api/budget", {"budget": "lots"})[0] == 400
-    assert c.post("/api/budget", {"budget": "0"})[0] == 400
-
-
 # -- file drops ----------------------------------------------------------------------------------------------
 
 
@@ -1041,7 +994,8 @@ def downloads(tmp_path, monkeypatch):
 
 def test_dropping_the_entries_file_recognises_its_lineups_and_tiers_the_spend(make, tmp_path, downloads):
     c = make()
-    c.post("/api/budget", {"budget": "50"})
+    # the Weekly Budget as `dfs contests plan` leaves it (Removal F7 took the page's budget box)
+    week_inputs.save_input("budget", {"budget": 50.0}, season=SEASON, week=WEEK, data_dir=c.tmp / "data")
     status, got = drop(c, "DKEntries.csv", entries_bytes(tmp_path))
     assert status == 200 and got["kind"] == "entries"
     assert got["summary"][0].startswith("entries for 4 lineups, 5 contests")
@@ -1346,21 +1300,14 @@ def test_every_weekly_button_is_a_registered_command_with_its_options():
             assert 0 < len(label) <= 48, f"{path} {name}: {label!r}"
 
 
-def test_a_run_keeps_its_duration_id_and_output_for_recent_runs(make):
+def test_a_run_keeps_its_duration_and_id_and_no_output_viewer(make):
     c = make()
     status, started = c.post("/api/jobs/start", {"command": "dfs sync --live", "values": {}})
     job = wait_job(c, started["job"])
     h = c.get("/api/jobs/history")[1]["history"][0]
     assert h["id"] == job.id and h["seconds"] >= 0 and h["rc"] == 0
-    assert (c.tmp / "jobs" / f"{job.id}.log").exists()
-    c.jobs.jobs.clear()  # a past run (the server restarted): read from the saved log
-    status, out = c.get(f"/api/jobs/output?job={job.id}")
-    assert (
-        status == 200
-        and out["lines"][0] == "$ dfs sync --live"
-        and "ran -m dfs.cli sync --live" in out["lines"]
-    )
-    assert c.get("/api/jobs/output?job=../../etc")[0] == 404  # an id, never a path
+    assert not (c.tmp / "jobs").exists()  # Removal F7: no saved output per run
+    assert c.get(f"/api/jobs/output?job={job.id}")[0] == 404  # the route is gone
 
 
 # -- blueprint C2: the Lock state's answers ------------------------------------------------------------------

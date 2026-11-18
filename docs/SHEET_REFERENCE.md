@@ -777,13 +777,12 @@ moves a tab and never fails the command that ran it: a problem prints a yellow l
 
 **Layout.** Row 1 the title, row 2 the status (sheet, time, whether ownership is published, the weeks the field was fitted on, the draws), row 3 the **colour legend** (`stacks_tab.legend_text`, frozen with rows 1-2),
 row 4 the **track record** (the retro, with its verdict). Then **TOP 20 QB STACKS**:
-`A` the cue (`BUILD`, Plan O item 5: the first `stacks_tab.BUILD_CUES` = 5 rows of the leverage-sorted list that beat the field, Lift over 1x and Lev above 0, shown only while the leverage signal is tested or weak; the rest are not cued, and the legend says so). A BUILD row is
-tinted pale green across `A:M` (`sheet_style._SOFT_OK_BG`); `Top 1%` and `Lift` carry the sheet's red -> white -> green gradient and `Lev` the diverging one around 0 (`stacks_tab.SCALED`, drawn by `sheet_color_scales._scale_rule_specs`; `Lev` only once ownership is published). Nothing else on the tab is coloured. Columns: `QB`, `Teammates`, `Game`, `Salary`, `Proj` (CalPts, summed), `Top 1%` (the chance a lineup built on the stack,
+`A` is blank (it held the `BUILD` cue until Removal F8, the design pass, 2026-11-17: the tab is information, and no row is cued or tinted); `Top 1%` and `Lift` carry the sheet's red -> white -> green gradient and `Lev` the diverging one around 0 (`stacks_tab.SCALED`, drawn by `sheet_color_scales._scale_rule_specs`; `Lev` only once ownership is published). Nothing else on the tab is coloured. Columns: `QB`, `Teammates`, `Game`, `Salary`, `Proj` (CalPts, summed), `Top 1%` (the chance a lineup built on the stack,
 the rest filled the way the field fills it, finishes in the generated field's top 1%; 1% is an average lineup), `Lift` (Top 1% over 1%), `Field %` (the share of the generated field that plays exactly this stack), `Boom %` (the stack's
-share of the simulated top 1%: Top 1% x Field % / 1%), `Lev` (Boom % minus Field %, in points of the field), `BB edge` (Top 1% with a bring-back minus without) and `Type in the rules box` (`Always use: QB, mate, mate`). Then
+share of the simulated top 1%: Top 1% x Field % / 1%), `Lev` (Boom % minus Field %, in points of the field), `BB edge` (Top 1% with a bring-back minus without) and a blank `M` (the `Always use:` line until Removal F8). Then
 **TOP 8 GAMES**: total, pace, spread, the share of the field stacking either QB (`Stack %`), the share stacking with a bring-back from the same game, and the game's best stack Lev. The Lev header says `(weak signal)` or `(untested)`
 until the retro has shown it beats stacks picked at random; an untested signal sorts the list by Boom % instead. Before TFFB publishes ownership the field is generated from a CalPts stand-in, so `Field %`, `Boom %`, `Lev`
-and the games' stack rates read `-`, nothing is cued and the list sorts by Top 1%. The calculation is in `docs/CALCULATIONS.md` ("Stack ranker").
+and the games' stack rates read `-` and the list sorts by Top 1%. The calculation is in `docs/CALCULATIONS.md` ("Stack ranker").
 
 ### Slate Grid
 

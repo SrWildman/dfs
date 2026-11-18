@@ -4539,9 +4539,9 @@ def week_serve_command(
     ),
 ) -> None:
     """Serve the Week page on this Mac only (127.0.0.1, a random token in the link it opens), with Claude Code
-    docked beside it: ask in the chat without leaving the page, press a button to run any `dfs` command with
-    live output, drop DraftKings' entries file at lock and the history / standings at close, and check a
-    contest against the tiers. Claude Code runs here in the main checkout under your own login and asks you
+    beside it (folded until you press Ask Claude): ask in the chat without leaving the page, press a button to
+    run any `dfs` command with live output, and drop DraftKings' entries file at lock and the history /
+    standings at close. Claude Code runs here in the main checkout under your own login and asks you
     (Approve / Deny on the page) before anything that needs approval; commands that write take the run lock,
     so the chat, the buttons and a terminal cannot write at once. The page itself writes three things to the
     week's sheet: a player's Pool cell (Cash / GPP / Both / none, the sheet dropdown's cell), a

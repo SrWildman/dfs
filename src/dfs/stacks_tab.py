@@ -1,12 +1,11 @@
 """The `Stacks` tab as rows plus formatting instructions (`build_layout` is pure; `sheet_stacks` reads the
 inputs and writes it).
 
-Read-only and rewritten whole, like the Cockpit: nothing on it is typed and it holds no formula. Column A is
-the cue (`BUILD`: the stack takes a bigger share of the simulated top 1% than of the field, so it is worth
-typing into Suggested's rules box); the last column holds the line to type there. Only the `BUILD_CUES` (5)
-highest-leverage stacks that beat the field get it (Sam, Plan O item 5: on Week 9 all 20 did, so the cue
-separated nothing); their rows are tinted pale green. Top 1%, Lift and Lev carry colour scales within the
-table, and the legend (row 3, frozen with the title) says what each colour means.
+Read-only and rewritten whole, like the Cockpit: nothing on it is typed and it holds no formula. An
+information view: Removal F8 (the design pass, Sam, 2026-11-17) took out the `BUILD` cue in column A, its pale
+green row and the "Always use" line in the last column, so both columns stay (the layout does not move) and
+are blank. Top 1%, Lift and Lev carry colour scales within the table, and the legend (row 3, frozen with the
+title) says what each colour means.
 
 Two things change what the tab shows, and it says which:
 
@@ -32,8 +31,7 @@ from dfs.cockpit import clock
 
 STACKS_TAB = "Stacks"
 COLUMN_COUNT = 13
-CUE_BUILD = "BUILD"
-BUILD_CUES = 5  # the most stacks cued BUILD: the top 5 by leverage that beat the field (Sam, Plan O item 5)
+CUE_BUILD = "BUILD"  # retired by Removal F8: no row is cued (kept so an old saved layout still reads)
 DASH = "-"
 # The stacks table's scaled columns (`sheet_stacks` draws them in the sheet's palette): header -> kind.
 SCALED = {"Top 1%": "gradient", "Lift": "gradient", "Lev": "diverging"}
@@ -50,7 +48,7 @@ STACK_HEADERS = [
     "Boom %",
     "Lev",
     "BB edge",
-    "Type in the rules box",
+    "",  # was "Type in the rules box" (Removal F8): blank, so no column moves
 ]
 GAME_HEADERS = ["Game", "Total", "Pace", "Spread", "Stack %", "Game stack %", "Best Lev"]
 
@@ -114,11 +112,6 @@ class _Builder:
         self.layout.note_rows.append(self.add(["", text]))
 
 
-def rule_text(qb: str, mates: str) -> str:
-    """What to type on Suggested's `Always use` line to build the stack (full names resolve on their own)."""
-    return f"Always use: {qb}, {mates}"
-
-
 def sorted_table(table: pd.DataFrame, *, published: bool, verdict: str | None) -> tuple[pd.DataFrame, str]:
     """The stacks in the order the tab shows them, and the sentence naming it."""
     if table.empty:
@@ -132,26 +125,18 @@ def sorted_table(table: pd.DataFrame, *, published: bool, verdict: str | None) -
     return table.sort_values(["boom_share", "top1"], ascending=False, kind="stable"), "boom share"
 
 
-def _beats_the_field(row, *, published: bool, verdict: str | None) -> bool:
-    return bool(published and verdict in (TESTED, WEAK) and row["lev"] > 0 and row["lift"] > 1.0)
-
-
 def legend_text(verdict: str | None, published: bool) -> str:
-    """The colour legend (Plan O item 5), in the tab's header rows."""
+    """The colour legend (Plan O item 5), in the tab's header rows. Information only: no row is cued."""
     if not published:
-        cue = "No BUILD cue until TFFB publishes ownership (field % and leverage wait for it)."
+        state = "Field % and leverage wait for TFFB's ownership."
     elif verdict not in (TESTED, WEAK):
-        cue = "No BUILD cue: the leverage signal is untested (run `dfs stacks --retro`)."
+        state = "The leverage signal is untested (run `dfs stacks --retro`)."
     else:
-        cue = (
-            f"Green row, BUILD in column A: one of the {BUILD_CUES} highest-leverage stacks that beat the "
-            "field (Lift over 1x and Lev above 0: its share of the simulated top 1% beats its share of the "
-            f"field), with a {verdict} signal. The other rows are not cued, even where they beat the field "
-            "too."
-        )
+        state = f"The leverage signal is {verdict} (the track record below)."
     return (
-        f"COLOURS  ·  {cue}  ·  Top 1%, Lift and Lev are shaded within this table: green = higher, red = "
-        "lower, white = the table's middle (Lev: white at 0). Nothing else is coloured."
+        f"COLOURS  ·  Information: nothing here is a pick.  {state}  ·  Top 1%, Lift and Lev are shaded "
+        "within this table: green = higher, red = lower, white = the table's middle (Lev: white at 0). "
+        "Nothing else is coloured."
     )
 
 
@@ -195,17 +180,11 @@ def build_layout(inputs: StackTabInputs) -> Layout:
     b.section(f"TOP {stacks.STACK_ROWS} QB STACKS  —  sorted by {sort_label}")
     b.header(*[lev_label if h == "Lev" else h for h in STACK_HEADERS])
     first = b.next_row
-    cued = 0
     for _, r in table.head(stacks.STACK_ROWS).iterrows():
-        # BUILD for the first BUILD_CUES rows that beat the field: the table is in leverage order whenever a
-        # cue is possible (a tested or weak signal), so these are the top 5 by leverage
-        cue = ""
-        if cued < BUILD_CUES and _beats_the_field(r, published=published, verdict=inputs.verdict):
-            cue, cued = CUE_BUILD, cued + 1
         game = f"{r['team']} v {r['opp']}"
-        row = b.add(
+        b.add(
             [
-                cue,
+                "",  # the retired cue column (Removal F8)
                 r["qb"],
                 r["mates"],
                 game,
@@ -217,11 +196,9 @@ def build_layout(inputs: StackTabInputs) -> Layout:
                 float(r["boom_share"]) if published else DASH,
                 float(r["lev"]) if published else DASH,
                 float(r["bb_edge"]),
-                rule_text(r["qb"], r["mates"]),
+                "",  # the retired "Always use" line (Removal F8)
             ]
         )
-        if cue:
-            b.layout.cue_rows[row] = cue
     last = b.next_row - 1
     if last >= first:
         for col, pattern, kind in (
@@ -285,7 +262,7 @@ def build_layout(inputs: StackTabInputs) -> Layout:
     b.blank()
     b.note(
         "Rebuilt by `dfs stacks` and `dfs sync` (where this tab exists); nothing here is typed. To build "
-        "one: type its last cell into Suggested's rules box (names after `Always use`), then run "
+        "a stack, write it on Suggested's rules box yourself (`Always use` or `Stack rules`), then run "
         "`dfs lineups suggest --iterate`."
     )
     return b.layout

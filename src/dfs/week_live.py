@@ -38,7 +38,7 @@ body.live{display:flex;align-items:flex-start}
 #pagecol{flex:1;min-width:0;height:100vh;overflow-y:auto}
 #chat{width:430px;flex:none;height:100vh;position:sticky;top:0;display:flex;flex-direction:column;
 border-left:1px solid var(--line);background:var(--card)}
-#chat.collapsed{width:44px}
+#chat.collapsed{display:none}
 #chat.collapsed>*:not(.chat-head){display:none}
 #chat.collapsed .chat-head>*:not(#chat-toggle){display:none}
 .chat-head{padding:8px 10px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;
@@ -123,38 +123,15 @@ font-size:13px;padding:3px 0;border-bottom:1px solid var(--line)}
 #run-out{background:#0f1115;color:#d7dae0;border-radius:8px;padding:10px;font:12px/1.4 ui-monospace,Menlo,
 monospace;max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:8px 0}
 @media(max-width:900px){body.live{display:block}#pagecol{height:auto;overflow:visible}
-#chat{position:fixed;right:0;top:0;width:100%;max-width:430px;z-index:5}#chat.collapsed{width:44px}
-body.live.chat-closed #pagecol{padding-right:44px}}
+#chat{position:fixed;right:0;top:0;width:100%;max-width:430px;z-index:25}#chat.collapsed{display:none}}
 """
 
 CONTEST_HTML = """
-<section class="card live-card" id="live-contest" data-keep>
-<div class="card-head"><h3>Check a contest, and drop your entries</h3></div>
-<p class="note">Type five fields while you look at a contest in the lobby; nothing is read from DraftKings.</p>
-<form id="check-form" autocomplete="off">
-<div class="formgrid">
-<label>Format<select name="format"><option>GPP</option><option>H2H</option><option>50/50</option>
-<option>Double Up</option><option>Showdown</option><option>Other</option></select></label>
-<label>Fee ($)<input type="text" name="fee" inputmode="decimal" placeholder="5"></label>
-<label>Entrants (so far / max)<input type="text" name="entrants" placeholder="1,234 / 2,450"></label>
-<label>Entries per user<input type="text" name="entry_max" inputmode="numeric" placeholder="1, 3, 20"></label>
-<label>Prize pool or min-cash<input type="text" name="prize" placeholder="30000  or  2x"></label>
-<label id="opp-field" hidden>H2H opponent<input type="text" name="opponent" placeholder="username"></label>
-</div>
-<button class="primary" type="submit">Check</button>
-</form>
-<div id="check-out"></div>
-<h4>Weekly Budget</h4>
-<form id="budget-form" class="row" autocomplete="off">
-<input type="text" name="budget" inputmode="decimal" placeholder="%BUDGET%" size="8">
-<button type="submit">Save for this week</button>
-<span class="note">The plan above splits it by tier. <code>dfs contests plan</code> reads it from the
-Bankroll tab; this is for when you have not run that.</span></form>
-<h4>Drop a file</h4>
-<div class="dropzone" id="dropzone">Drop DraftKings' <b>entries file</b> at lock, or your <b>contest-history
-export</b> and the <b>standings</b> (.csv or .zip) at close.<br><input type="file" id="drop-file"
-accept=".csv,.zip"></div>
-<div id="drop-out"></div>
+<section class="card sec live-card" id="live-drop" data-keep>
+<div class="sec-h"><h2>Drop a file</h2></div><div class="sec-b">
+<div class="dropzone" id="dropzone">DraftKings' <b>entries file</b> at lock; the <b>contest-history export</b> and
+the <b>standings</b> (.csv or .zip) at close.<br><input type="file" id="drop-file" accept=".csv,.zip"></div>
+<div id="drop-out"></div></div>
 </section>
 """
 
@@ -312,9 +289,9 @@ function chatFold(collapsed, save) {
   document.body.classList.toggle('chat-open', !collapsed); document.body.classList.toggle('chat-closed', collapsed);
   $('#chat-toggle').setAttribute('aria-expanded', String(!collapsed));
   $('#chat-toggle').title = collapsed ? 'Show the chat' : 'Hide the chat';
-  if (save) { try { localStorage.setItem('dfs-chat-collapsed', collapsed ? '1' : '0'); } catch (e) {} }
 }
-(() => { let c = false; try { c = localStorage.getItem('dfs-chat-collapsed') === '1'; } catch (e) {} chatFold(c, false); })();
+chatFold(true, false);   // folded on every load (Sam, 2026-11-17): it opens only when he asks
+{ const ao = $('#ask-open'); if (ao) ao.onclick = () => { chatFold(!$('#chat').classList.contains('collapsed'), true); if (!$('#chat').classList.contains('collapsed')) $('#chat-text').focus(); }; }
 $('#chat-toggle').onclick = (e) => { e.stopPropagation(); chatFold(!$('#chat').classList.contains('collapsed'), true); };
 $('#chat').addEventListener('click', () => { if ($('#chat').classList.contains('collapsed')) chatFold(false, true); });
 $('#chat-auto').onchange = (e) => { if (e.target.checked && !confirm("Auto mode lets Claude Code approve what it judges safe without asking you. Turn it on?")) e.target.checked = false; };
@@ -542,16 +519,9 @@ async function loadHistory() {
       const li = el('li', ok ? 'ok' : 'bad');
       li.append(el('span', 'st', ok ? 'ok' : (h.stopped ? 'stopped' : 'failed')), el('code', null, h.command),
         el('span', 't', [took(h.seconds), at(h.time), ok || h.stopped ? '' : 'exit ' + h.rc].filter(Boolean).join(' · ')));
-      if (h.id) { const a = el('a', null, 'output'); a.href = '#'; a.dataset.job = h.id; a.onclick = (e) => { e.preventDefault(); showOutput(h.id, h.command); }; li.append(a); }
       ul.append(li);
     }
   } catch (e) {}
-}
-async function showOutput(id, command) {
-  const out = $('#run-out'); out.hidden = false;
-  try { const r = await get('/api/jobs/output?job=' + encodeURIComponent(id)); out.textContent = r.lines.join('\n'); }
-  catch (e) { out.textContent = command + ': ' + e.message; }
-  out.scrollIntoView({block: 'nearest'});
 }
 
 
@@ -583,7 +553,7 @@ function write(path, data) {
     }
   }));
 }
-window.dfsLive = {post, pool: (body) => post('/api/pool', body), stack: (body) => post('/api/stack', body), refresh: refreshSections, refreshing: () => !!refreshing || again, toast};
+window.dfsLive = {post, pool: (body) => post('/api/pool', body), refresh: refreshSections, refreshing: () => !!refreshing || again, toast};
 function askFirst(anchor, text, yes, onYes) {
   const old = anchor.parentElement.querySelector('.confirm'); if (old) { old.remove(); return; }
   const box = el('div', 'confirm flag'); box.append(el('div', null, text));
@@ -645,26 +615,7 @@ function rerunCash(r, key) {
   if (r && /^(core|spot):/.test(key || '')) startJob(CASH_RERUN.command, CASH_RERUN.values);
 }
 
-/* ---------- the contest check form, the budget, the drop zone ---------- */
-const checkForm = $('#check-form');
-checkForm.format.onchange = () => { $('#opp-field').hidden = checkForm.format.value !== 'H2H'; };
-checkForm.onsubmit = async (ev) => {
-  ev.preventDefault(); const out = $('#check-out'); out.replaceChildren();
-  const data = {}; for (const [k, v] of new FormData(checkForm)) data[k] = v;
-  try {
-    const r = await post('/api/check', data); const box = el('div', 'verdict');
-    box.append(el('span', 'tier ' + r.tier, r.tier === 'Avoid' ? 'Avoid' : 'Tier ' + r.tier), document.createTextNode(r.reason));
-    const bits = []; if (r.rake != null) bits.push('Effective rake ' + (r.rake * 100).toFixed(1) + '%');
-    if (r.opponent_record) bits.push('Your record against him: ' + r.opponent_record);
-    if (bits.length) box.append(el('div', 'note', bits.join('  |  ')));
-    for (const f of r.flags) box.append(el('div', 'note', 'Flag: ' + f));
-    out.append(box);
-  } catch (e) { out.append(el('p', 'bad', e.message)); }
-};
-$('#budget-form').onsubmit = async (ev) => {
-  ev.preventDefault();
-  try { await post('/api/budget', {budget: ev.target.budget.value}); refreshSections(); ev.target.budget.value = ''; } catch (e) { alert(e.message); }
-};
+/* ---------- the drop zone ---------- */
 const zone = $('#dropzone');
 ['dragenter', 'dragover'].forEach((n) => zone.addEventListener(n, (e) => { e.preventDefault(); zone.classList.add('over'); }));
 ['dragleave', 'drop'].forEach((n) => zone.addEventListener(n, (e) => { e.preventDefault(); zone.classList.remove('over'); }));
@@ -708,7 +659,7 @@ loadCommands().catch((e) => showRunError(e.message)); loadHistory(); loadChats()
 """
 
 
-def augment(page: str, *, token: str, nonce: str, read_only: bool, budget: float | None = None) -> str:
+def augment(page: str, *, token: str, nonce: str, read_only: bool) -> str:
     """The live version of a rendered Week page (see the module docstring)."""
     page = SAY.sub(
         lambda m: f'{m.group(1)}<button type="button" class="ask" data-say="{m.group(2)}">Ask</button>', page
@@ -718,8 +669,7 @@ def augment(page: str, *, token: str, nonce: str, read_only: bool, budget: float
         lambda m: f'<button type="button" class="runbtn" data-command="{m.group(1)}">{m.group(2)}</button>',
         page,
     )
-    contest = CONTEST_HTML.replace("%BUDGET%", f"{budget:,.0f}" if budget else "150")
-    page = page.replace(week_page.LIVE_CONTEST, contest).replace(week_page.LIVE_RUN, RUN_HTML)
+    page = page.replace(week_page.LIVE_CONTEST, CONTEST_HTML).replace(week_page.LIVE_RUN, RUN_HTML)
     chat = CHAT_HTML.replace(
         "%MODELS%",
         "".join(

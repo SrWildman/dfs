@@ -67,23 +67,21 @@ def test_write_stacks_writes_the_rows_then_styles_cues_formats_and_freezes():
     assert client.calls[0][:2] == ("write_tab", "Stacks")
     assert client.calls[0][2] == lay.rows
     formatted = {c[2] for c in client.named("format_range")}
-    for row in lay.cue_rows:
-        assert f"A{row}" in formatted
     for rng, _p, _k in lay.formats:
         assert rng in formatted
     assert client.named("freeze")[0][1] == "Stacks"
     assert client.named("set_column_widths")[0][2]["M"] == sheet_stacks.COLUMN_PX["M"]
 
 
-def test_build_rows_are_tinted_the_three_columns_scaled_and_the_legend_frozen():
-    """Plan O item 5: a BUILD row is pale green across the table, Top 1% / Lift / Lev carry the sheet's colour
-    scales (last run's rules cleared first, their rows move) and the legend row stays in view."""
+def test_no_row_is_tinted_the_three_columns_scaled_and_the_legend_frozen():
+    """Removal F8: no BUILD row is tinted; Top 1% / Lift / Lev carry the sheet's colour scales (last run's
+    rules cleared first, their rows move) and the legend row stays in view."""
     from dfs.sheet_style import _SOFT_OK_BG
 
     client, lay = FakeClient(), layout()
     sheet_stacks.write_stacks(client, lay)
     tints = {c[2] for c in client.named("format_range") if c[3].get("backgroundColor") == _SOFT_OK_BG}
-    assert tints == {f"A{row}:M{row}" for row in lay.cue_rows}
+    assert tints == set()
     names = [c[0] for c in client.calls]
     assert names.index("clear_conditional_formats") < names.index("add_color_scales")
     scaled = [c[2][0]["a1_range"] for c in client.named("add_color_scales")]

@@ -471,6 +471,33 @@ def test_an_open_spot_pick_writes_cash_scope_on_always_use_and_adds_him_as_cash(
     assert sheet.get(ss.TAB, *cell) == "" and edits.read().pool.get("id-Te Plain", "") == ""
 
 
+def test_someone_else_for_an_open_spot_writes_the_same_cash_rule_and_undo_takes_it_back(
+    edits, sheet, tmp_path
+):
+    """The design pass (Sam, 2026-11-17): "Someone else..." picks a pool player who fits the slot and the
+    salary left; it writes the same `cash: Name` on Always use as a card pick."""
+    core = cash_core_input()
+    core["default"]["left"] = 1500
+    inp = replace(inp_for(tmp_path, chalk_rows()), cash_core=core)
+    cell = (2, ss.NAME_INDEX)
+    with pytest.raises(week_writes.WriteError):  # $9,000: more than the spot can pay
+        week_actions.decide(edits, inp, key="spot:FLEX", option="id-Wr Star", rules_was=edits.read().rules)
+    assert week_actions.answers(inp) == {}  # a refused pick leaves nothing behind
+    text, pool = week_actions.decide_pool(
+        edits, inp, key="spot:FLEX", option="id-Te Fade", rules_was=edits.read().rules
+    )
+    assert sheet.get(ss.TAB, *cell) == "cash: Te Fade" and "FLEX: Te Fade" in text
+    assert pool == {"id-Te Fade": "Cash"}
+    d = next(
+        d
+        for d in week_board.decisions(inp, edits.read().rules, week_actions.answers(inp))
+        if d.key == "spot:FLEX"
+    )
+    assert d.answer == "id-Te Fade" and d.undo and "Te Fade" in [c["Name"] for c in d.candidates]
+    week_actions.decide(edits, inp, key="spot:FLEX", option="undo", rules_was=edits.read().rules)
+    assert sheet.get(ss.TAB, *cell) == "" and week_board.OTHER + "spot:FLEX" not in week_actions.answers(inp)
+
+
 def test_a_core_fade_writes_cash_scope_on_never_use_and_the_chalk_decision_does_not_ask_again(
     edits, sheet, tmp_path
 ):

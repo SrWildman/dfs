@@ -55,7 +55,6 @@ from urllib.parse import parse_qs, urlsplit
 
 from dfs import (
     commands_doc,
-    contest_tiers,
     nfl_calendar,
     paths,
     run_lock,
@@ -135,9 +134,7 @@ def render_page(ctx: Context, nonce: str) -> str:
         sheet=sheet,
         answers=week_actions.answers(inp),
     )
-    return week_live.augment(
-        page, token=ctx.token, nonce=nonce, read_only=ctx.read_only, budget=week_page.weekly_budget(inp)
-    )
+    return week_live.augment(page, token=ctx.token, nonce=nonce, read_only=ctx.read_only)
 
 
 def page_stamp(ctx: Context) -> float:
@@ -182,42 +179,6 @@ def _load_config():
         return cfg.contest_plan, cfg.contests.downloads_dir
     except Exception:  # noqa: BLE001 - the page works on a machine without credentials
         return ContestPlanConfig(), None
-
-
-def check_contest(ctx: Context, form: dict[str, Any]) -> dict[str, Any]:
-    """The check form: a verdict for one contest from its five fields, and the H2H opponent's record."""
-    try:
-        contest = contest_tiers.contest_from_form(form)
-    except contest_tiers.FormError as exc:
-        raise HttpError(400, str(exc)) from exc
-    opponents = week_drops.load_opponents()
-    record = ""
-    avoid: list[str] = []
-    if opponents is not None:
-        from dfs import contest_plan
-
-        avoid = contest_plan.avoid_names(opponents)
-        if contest.opponent:
-            row = opponents[opponents["opponent"].astype(str).str.casefold() == contest.opponent.casefold()]
-            if len(row):
-                r = row.iloc[0]
-                record = f"{int(r['wins'])}-{int(r['losses'])} over {int(r['meetings'])} games"
-    verdict = contest_tiers.classify(contest, avoid_opponents=avoid)
-    return contest_tiers.verdict_payload(contest, verdict, opponent_record=record)
-
-
-def save_budget(ctx: Context, raw: Any) -> dict[str, Any]:
-    try:
-        value = contest_tiers.parse_amount(str(raw), "budget")
-    except contest_tiers.FormError as exc:
-        raise HttpError(400, str(exc)) from exc
-    if not 0 < value < 100_000:
-        raise HttpError(400, "budget: type the week's budget in dollars")
-    if not week_inputs.save_input(
-        "budget", {"budget": value}, season=ctx.season, week=ctx.week, data_dir=ctx.data_dir
-    ):
-        raise HttpError(500, "could not save the budget")
-    return {"budget": value}
 
 
 def receive_drop(ctx: Context, name: str, data: bytes) -> dict[str, Any]:
@@ -507,12 +468,6 @@ class Handler(BaseHTTPRequestHandler):
     def get_job_history(self) -> None:
         self._json(200, {"history": self.ctx.jobs.history()})
 
-    def get_job_output(self) -> None:
-        lines = self.ctx.jobs.output(self._query().get("job", ""))
-        if lines is None:
-            raise HttpError(404, "no output kept for that run")
-        self._json(200, {"lines": lines})
-
     def get_chat_list(self) -> None:
         self._json(200, {"chats": self.ctx.chat.list_chats()})
 
@@ -569,12 +524,6 @@ class Handler(BaseHTTPRequestHandler):
         if not self.ctx.chat.stop():
             raise HttpError(409, "nothing is running")
         self._json(200, {"stopping": True})
-
-    def post_check(self) -> None:
-        self._json(200, check_contest(self.ctx, self._json_body()))
-
-    def post_budget(self) -> None:
-        self._json(200, save_budget(self.ctx, self._json_body().get("budget")))
 
     def post_drop(self) -> None:
         if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/octet-stream":
@@ -648,19 +597,7 @@ def _post_decide(self: Handler) -> None:
     self._json(200, sheet_write(self.ctx, act))
 
 
-def _post_stack(self: Handler) -> None:
-    data = self._json_body()
-    rules_was = data.get("rules_was") if isinstance(data.get("rules_was"), dict) else {}
-    names = data.get("names") if isinstance(data.get("names"), list) else []
-
-    def act(edits, inp):
-        return {"message": week_actions.more_stack(edits, inp, names, rules_was)}
-
-    self._json(200, sheet_write(self.ctx, act))
-
-
 Handler.post_pool = _post_pool  # type: ignore[attr-defined]
-Handler.post_stack = _post_stack  # type: ignore[attr-defined]
 Handler.post_pool_start = _post_pool_start  # type: ignore[attr-defined]
 Handler.post_decide = _post_decide  # type: ignore[attr-defined]
 
@@ -685,7 +622,6 @@ GET_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/api/chat/transcript": Handler.get_chat_transcript,
     "/api/jobs/stream": Handler.get_job_stream,
     "/api/jobs/history": Handler.get_job_history,
-    "/api/jobs/output": Handler.get_job_output,
 }
 POST_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/api/jobs/start": Handler.post_job_start,
@@ -693,15 +629,12 @@ POST_ROUTES: dict[str, Callable[[Handler], None]] = {
     "/api/chat/send": Handler.post_chat_send,
     "/api/chat/approve": Handler.post_chat_approve,
     "/api/chat/stop": Handler.post_chat_stop,
-    "/api/check": Handler.post_check,
-    "/api/budget": Handler.post_budget,
     "/api/drop": Handler.post_drop,
     "/api/pool": _post_pool,
     "/api/pool/start": _post_pool_start,
     "/api/decide": _post_decide,
     "/api/lock": _post_lock,
     "/api/reason": _post_reason,
-    "/api/stack": _post_stack,
 }
 
 
