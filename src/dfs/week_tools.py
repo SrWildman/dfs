@@ -3,7 +3,7 @@ what you get back and when it was last run. Generated, not written by hand:
 
 - the commands come from the CLI's own registry (`commands_doc.all_commands()`), so a new command shows up on
   the page the moment it exists, and a test fails if one is missing from it;
-- the phrases and what they return come from CLAUDE.md's two shortcut tables (`parse_phrases`), the same text
+- the phrases and what they return come from docs/SHORTCUTS.md's two tables (`parse_phrases`), the same text
   Claude Code reads, so the page and the session cannot disagree about what "late swap" means;
 - "last run" comes from the run log (`runlog.py`).
 
@@ -113,7 +113,7 @@ class Tool:
         return sorted(seen, key=lambda c: (len(c), c)) or [self.command]
 
 
-# -- CLAUDE.md --------------------------------------------------------------------------------------
+# -- docs/SHORTCUTS.md------------------------------------------------------------------------------
 
 _CELLS = re.compile(r"(?<!\\)\|")
 
@@ -124,7 +124,7 @@ def clean_cell(text: str) -> str:
 
 def commands_with_flags(cell: str) -> list[str]:
     """Every `dfs ...` in a table cell, each reduced to its name and the NAMES of its required flags
-    (`dfs sync --live`). Anything in [brackets] is optional in CLAUDE.md's notation and is dropped."""
+    (`dfs sync --live`). Anything in [brackets] is optional in docs/SHORTCUTS.md's notation and is dropped."""
     out = []
     for m in re.finditer(r"`(dfs [^`]+)`", cell):
         text = re.sub(r"\[[^\]]*\]", " ", m.group(1))
@@ -136,10 +136,10 @@ def commands_with_flags(cell: str) -> list[str]:
 
 
 def parse_phrases(text: str | None = None) -> list[Phrase]:
-    """Every row of CLAUDE.md's shortcut tables (`| "start week N" | run | report |`)."""
+    """Every row of docs/SHORTCUTS.md's tables (`| "start week N" | run | report |`)."""
     if text is None:
         try:
-            text = (paths.REPO_ROOT / "CLAUDE.md").read_text()
+            text = (paths.REPO_ROOT / "docs" / "SHORTCUTS.md").read_text()
         except OSError:
             return []
     out = []

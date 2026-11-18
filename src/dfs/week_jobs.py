@@ -148,8 +148,8 @@ class Weekly:
 
 
 # Sam's standard week, in the day's order (Plan O item 1b). The options up front are the ones his weekly
-# shortcuts use (CLAUDE.md): `sync --live` on Sunday, the late swap's ESPN injury refresh and `--field auto`,
-# `week close --research`, an entries file by hand.
+# shortcuts use (docs/SHORTCUTS.md): `sync --live` on Sunday, the late swap's ESPN injury refresh and
+# `--field auto`, `week close --research`, an entries file by hand.
 WEEKLY: tuple[Weekly, ...] = (
     Weekly("Sync", "dfs sync", "Saturday, and after any news", ("live", "props")),
     Weekly("Contest plan", "dfs contests plan", "before entering", ("budget",)),

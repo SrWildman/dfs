@@ -535,7 +535,7 @@ just the code:
 | A new data source | `docs/COMMANDS.md` regenerates its row in the data-source table; `docs/SHEET_REFERENCE.md`'s synced-tabs table; the `[google_sheets.tab_mappings]` line in `config.example.toml` (and every existing local `config.toml`) if it has a tab |
 | A new column on EdgeRaw / Slate Grid / Model Check | A header note in `sheet_column_notes.py` (a test fails without one), `docs/SHEET_REFERENCE.md`, `docs/CALCULATIONS.md` if it is computed |
 | A new symptom worth debugging by hand | `docs/TROUBLESHOOTING.md` |
-| A command's name, group, or behavior | README's Commands section, `CLAUDE.md`'s doc map, `docs/WORKFLOW.md`, the Instructions tab on both sheets, and every docstring/comment mentioning it (`grep -rn 'dfs ' src/`) |
+| A command's name, group, or behavior | README's Commands section, its block in `docs/CODE_MAP.md` (or `docs/WEEK_PAGE.md`), `docs/SHORTCUTS.md` if a phrase runs it (code parses that table), `docs/COMMANDS.md` (regenerate), `docs/WORKFLOW.md`, the Instructions tab on both sheets, and every docstring/comment mentioning it (`grep -rn 'dfs ' src/`) |
 
 The Instructions tab is a real Google Sheet, not a file in this repo --
 update it with `SheetsClient.update_range` (see any `dfs setup`/`dfs
