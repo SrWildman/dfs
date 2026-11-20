@@ -474,10 +474,10 @@ def pull(
         frame = _merge_with_previous(frame, {e.get("id") for e in payloads})
     frame.attrs.update({"spent": spent, "remaining": reading.remaining, "unmatched": len(unmatched)})
     if len(unmatched):
-        from dfs.paths import CURRENT_DIR
+        from dfs import store
 
-        CURRENT_DIR.mkdir(parents=True, exist_ok=True)
-        unmatched.to_csv(CURRENT_DIR / "unmatched_odds_props.csv", index=False)
+        store.current_dir().mkdir(parents=True, exist_ok=True)
+        unmatched.to_csv(store.current_dir() / "unmatched_odds_props.csv", index=False)
     return frame
 
 

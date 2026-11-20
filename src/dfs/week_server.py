@@ -56,7 +56,6 @@ from urllib.parse import parse_qs, urlsplit
 from dfs import (
     commands_doc,
     nfl_calendar,
-    paths,
     run_lock,
     week_actions,
     week_chat,
@@ -102,7 +101,7 @@ class Context:
 
     def log(self, line: str) -> None:
         try:
-            target = self.log_path or paths.DATA_DIR / "week" / "serve.log"
+            target = self.log_path or _slate_root() / "week" / "serve.log"
             target.parent.mkdir(parents=True, exist_ok=True)
             with self._log_lock, target.open("a") as fh:
                 fh.write(f"{datetime.now().astimezone().isoformat(timespec='seconds')} {line}\n")
@@ -221,7 +220,7 @@ def sheet_write(ctx: Context, action: Callable[[week_writes.SheetEdits, week_inp
 
 
 def decisions_path(ctx: Context) -> Path:
-    return (ctx.data_dir or paths.DATA_DIR) / "week" / "decisions.jsonl"
+    return (ctx.data_dir or _slate_root()) / "week" / "decisions.jsonl"
 
 
 def log_decision(ctx: Context, inp: week_inputs.WeekInputs, d, data: dict) -> tuple[str, str]:  # noqa: ANN001
@@ -716,7 +715,15 @@ def sheet_edits(sheet_id: str | None, read_only: bool) -> tuple[Any, str]:
 
 
 def pid_path() -> Path:
-    return paths.DATA_DIR / "week" / "serve.pid"
+    """`data/week/serve.pid`; a secondary slate's server has its own, so it runs beside the main one."""
+    return _slate_root() / "week" / "serve.pid"
+
+
+def _slate_root() -> Path:
+    """`data/` on the main slate, `data/slates/<key>/` on a secondary one (`slate.py`)."""
+    from dfs import slate
+
+    return slate.root()
 
 
 def _is_dfs_process(pid: int) -> bool:
@@ -810,7 +817,10 @@ def serve(
     ctx = server.ctx
     url = f"http://{LOOPBACK}:{ctx.port}/?t={ctx.token}"
     echo(line)
-    echo(f"Week {week} page: {url}")
+    from dfs import slate
+
+    on = "" if slate.is_main() else f" (the {slate.label()} slate)"
+    echo(f"Week {week}{on} page: {url}")
     echo(
         f"Closed week, read only: {ctx.read_only}. Ctrl-C stops the server."
         if ctx.read_only

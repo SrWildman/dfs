@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from dfs import cockpit, late_swap_store, my_frame, stakes
+from dfs import cockpit, late_swap_store, my_frame, slate, stakes
 from dfs import sheet_dk_upload as dku
 from dfs.cockpit import COCKPIT_TAB, DkEntry, Layout, PlanNumbers
 from dfs.config import Config
@@ -208,7 +208,7 @@ def _plan_k_inputs(  # noqa: ANN202
     soft."""
     import json
 
-    from dfs import entered, paths, practice, week_inputs
+    from dfs import entered, practice, week_inputs
 
     record = None
     try:
@@ -219,7 +219,7 @@ def _plan_k_inputs(  # noqa: ANN202
         unavailable["entered"] = str(e)
     trends = None
     try:
-        trends = practice.load_history(paths.DATA_DIR, season=season, week=week, now=now)
+        trends = practice.load_history(slate.root(), season=season, week=week, now=now)
     except Exception as e:  # noqa: BLE001 - an odd snapshot never stops the Cockpit
         unavailable["practice"] = str(e)
     if save_lineups:

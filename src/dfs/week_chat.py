@@ -149,7 +149,26 @@ def shortcuts_prompt(root: Path | None = None) -> str | None:
         text = ((root or paths.REPO_ROOT) / SHORTCUTS_DOC).read_text()
     except OSError:
         return None
-    return SHORTCUTS_HEAD + text if text.strip() else None
+    return slate_note() + SHORTCUTS_HEAD + text if text.strip() else None
+
+
+def slate_note() -> str:
+    """On a secondary slate's page (`dfs week serve --slate thu`), one paragraph first in the chat's prompt:
+    which slate this is, that every `dfs` command here works on it (DFS_SLATE is set), and that the main-only
+    commands refuse it. "" on the main slate, so its prompt is unchanged."""
+    from dfs import slate
+
+    if slate.is_main():
+        return ""
+    day = slate.DAY_NAMES[slate.DAYS[slate.current()]]
+    return (
+        f"This Week page is the {day} slate's ({slate.current()}), a secondary slate of the week, not the "
+        "main "
+        f"Sunday slate. {slate.ENV_VAR}={slate.current()} is set, so every `dfs` command run here works on "
+        "that slate's own sheet and files (a shortcut's commands included). Commands that are the main "
+        "slate's only (the close, results, research, the contests engine) refuse it: say so, and that they "
+        "run from a terminal without the slate.\n\n"
+    )
 
 
 def claude_command(args: StartArgs, claude: str = "claude", root: Path | None = None) -> list[str]:
@@ -347,7 +366,9 @@ class ChatManager:
     # -- storage
     @property
     def store_dir(self) -> Path:
-        return self._store_dir or paths.DATA_DIR / "week" / "chats"
+        from dfs import slate
+
+        return self._store_dir or slate.root() / "week" / "chats"
 
     def _index(self) -> list[dict]:
         try:

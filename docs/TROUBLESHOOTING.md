@@ -16,6 +16,29 @@ step that fits right now marked `>`. It asks for anything a command needs
 
 ---
 
+**"runs for the main slate only, so it does not run on the thu slate".**
+Cause: the command was given `--slate thu`, or it ran where `DFS_SLATE=thu` is set (a terminal you set it in, or
+the Thanksgiving page's chat and buttons from `dfs week serve --slate thu`). Only the commands a second slate needs
+take a slate (`slate.SLATE_COMMANDS`); the close, results, research and the contests engine are the main slate's.
+Fix: run it from a plain terminal without `--slate` (`unset DFS_SLATE` if you set it).
+
+---
+
+**"No sheet for the thu slate yet" / "[slates.thu] sheet_id is the main slate's sheet".**
+Cause: `--slate thu` before `dfs week new --slate thu "<url>"`, or config.toml's `[slates.thu]` points at the
+main week's sheet. A secondary slate always has its own copy of the template.
+Fix: copy the template as "Week N Thanksgiving", share it with the service account, run `dfs week new --slate thu
+"<url>"`.
+
+---
+
+**`dfs sync --slate thu` fails on draftkings: "No Classic draft group whose games are all on Thursday ...".**
+Cause: DraftKings has not posted that slate's Classic draft group yet, or it has started (only upcoming groups
+are read, as on the main slate).
+Fix: try again later; the other sources still synced. If it never appears, play the slate by hand.
+
+---
+
 **A command you used to run says "No such command".**
 Cause: this project's CLI got reorganized (one-time sheet construction
 moved under `dfs setup ...`, `dfs sheets doctor` promoted to top-level

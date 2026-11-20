@@ -117,11 +117,107 @@ def find_main_slate_draft_group() -> int:
     return draft_group_id
 
 
+_ISO_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?$"
+)
+
+
+def kickoff_eastern(start_time: str) -> datetime | None:
+    """A draftgroups game time as an Eastern wall-clock datetime (naive). DraftKings sends UTC with a `Z`
+    (`2026-11-26T17:30:00.0000000Z`, seven fractional digits); a time with no zone is read as Eastern
+    already. None when it cannot be read. (The main slate's `_is_sunday_afternoon` is unchanged.)"""
+    from zoneinfo import ZoneInfo
+
+    m = _ISO_RE.match((start_time or "").strip())
+    if not m:
+        return None
+    day, hh, mm, ss, zone = m.groups()
+    naive = datetime.fromisoformat(f"{day}T{hh}:{mm}:{ss or '00'}")
+    if not zone:
+        return naive
+    offset = "+00:00" if zone == "Z" else (zone if ":" in zone else f"{zone[:3]}:{zone[3:]}")
+    aware = datetime.fromisoformat(f"{naive.isoformat()}{offset}")
+    return aware.astimezone(ZoneInfo("America/New_York")).replace(tzinfo=None)
+
+
+def _game_start(game: dict) -> str:
+    return (
+        game.get("startTime")
+        or game.get("startDate")
+        or game.get("gameTime")
+        or game.get("date")
+        or game.get("startDateTime")
+        or ""
+    )
+
+
+def pick_slate_draft_group(data: dict, key: str, season: int, week: int) -> tuple[int, int]:
+    """`(draftGroupId, games)` of a secondary slate (`slate.py`): the largest Classic (contest type
+    `MILLIONAIRE_CONTEST_TYPE_ID`, the type the main slate and the salary CSV use) upcoming NFL draft group
+    whose games ALL kick off, in Eastern time, on the slate's date of the NFL week (Thanksgiving = that
+    week's Thursday). Ties go to the higher id. Raises DkSalariesFetchError when there is none."""
+    from dfs import slate
+
+    day = slate.slate_date(key, season, week)
+    candidates = []
+    seen = []  # every upcoming NFL Classic group, for the error: what DraftKings did list
+    for group in data.get("draftGroups", []):
+        ctype = group.get("contestType") or {}
+        if ctype.get("sport") != "NFL" or group.get("draftGroupState") != "Upcoming":
+            continue
+        if ctype.get("contestTypeId") != MILLIONAIRE_CONTEST_TYPE_ID:
+            continue
+        games = group.get("games") or []
+        kicks = [kickoff_eastern(_game_start(g)) for g in games]
+        seen.append(_describe_group(group.get("draftGroupId"), kicks))
+        if kicks and all(k is not None and k.date() == day for k in kicks):
+            candidates.append((len(games), group["draftGroupId"]))
+    if not candidates:
+        listed = "; ".join(seen[:12]) or "none"
+        raise DkSalariesFetchError(
+            f"No Classic draft group whose games are all on {day:%A %b %d} (the {key} slate of Week {week}) "
+            f"in DraftKings' current draftgroups (not posted yet, or already started). Upcoming NFL Classic "
+            f"groups listed: {listed}."
+        )
+    candidates.sort(reverse=True)
+    games, group_id = candidates[0]
+    return group_id, games
+
+
+def _describe_group(group_id: object, kicks: list[datetime | None]) -> str:
+    """`138500 (11 games, Sun Nov 29 1:00 pm - 4:25 pm ET)`; unreadable times are counted."""
+    known = sorted(k for k in kicks if k is not None)
+    if not known:
+        return f"{group_id} ({len(kicks)} games, no readable kickoff)"
+
+    def at(k: datetime) -> str:
+        return f"{k:%a %b} {k.day} {k.strftime('%I:%M %p').lstrip('0').lower()}"
+
+    span = at(known[0]) if known[0] == known[-1] else f"{at(known[0])} - {at(known[-1])}"
+    return f"{group_id} ({len(kicks)} games, {span} ET)"
+
+
+def find_slate_draft_group(key: str, season: int, week: int) -> int:
+    """The secondary slate's draftGroupId (`pick_slate_draft_group`), from the same public draftgroups list
+    the main slate's picker reads."""
+    resp = httpx.get(DRAFTGROUPS_URL, headers=_HEADERS, timeout=30)
+    resp.raise_for_status()
+    group_id, games = pick_slate_draft_group(resp.json(), key, season, week)
+    log.info("selected draft group %s (%d games, the %s slate)", group_id, games, key)
+    return group_id
+
+
 class DkSalariesSource(Source):
     name = "draftkings"
 
     def fetch(self, ctx: SyncContext) -> pd.DataFrame:
-        draft_group_id = find_main_slate_draft_group()
+        from dfs import slate
+
+        key = slate.current()
+        if key == slate.MAIN:
+            draft_group_id = find_main_slate_draft_group()
+        else:
+            draft_group_id = find_slate_draft_group(key, ctx.season, ctx.week)
         resp = httpx.get(
             SALARY_CSV_URL,
             params={"contestTypeId": MILLIONAIRE_CONTEST_TYPE_ID, "draftGroupId": draft_group_id},

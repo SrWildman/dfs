@@ -63,6 +63,22 @@ These run on the Season sheet, never the weekly one (`dfs season ...` prints its
 | "find me trades for A, B, C and D" (a list, any leagues) | `dfs season trades --all --players "A, B, C, D"` (per league, a name he owns is a sell and one on another roster a buy; names not in a league are skipped there) | per league: which names were sells and which buys, and the top ideas |
 | "analyze trade X for Y + $10 FAAB in <league>" | `dfs season trade "X" "Y + $10 FAAB" --league <league>` (FAAB goes on the side that pays it) | both sides' change, the market line and the verdict; it wrote the Analyzer tab |
 
+## A second slate (Thanksgiving, Saturdays, Christmas)
+
+A week with a second Classic slate (`docs/WORKFLOW.md`, "A second slate in one week"). Thanksgiving is `thu`; a
+Saturday slate is `sat` and Christmas `fri`: the same rows with that key. Always say **which sheet** each command
+used: the slate's own, never the main week's.
+
+| Sam says | Run, in order | Report back |
+|---|---|---|
+| "start thanksgiving" | **ask Sam for the copy's URL** (a copy of the template named "Week N Thanksgiving", shared with the service account) if he has not given it, then `dfs week new --slate thu "<url>"`, then `dfs doctor --slate thu` | the slate sheet's title and URL, that config.toml's main `sheet_id` is unchanged, doctor findings |
+| "sync thanksgiving" | `dfs sync --slate thu`, then `dfs doctor --slate thu` | each source's status, the games in the draft group it picked |
+| "final sync thanksgiving" | `dfs sync --live --slate thu` | what changed since the last sync, anyone in his Thanksgiving pool now OUT or Q |
+| "build thanksgiving lineups" | `dfs lineups suggest --slate thu` (his Thanksgiving pool must not be empty: if it is, say so and stop) | the same as "build me lineups", for the Thanksgiving sheet |
+| "record my thanksgiving entries" | `dfs entries record --slate thu` (he downloads the Thanksgiving entries file; never fetch it) | how many lineups and the contests each went into |
+| "thanksgiving late swap" | `dfs lineups late-swap --refresh-injuries --slate thu` | the same as "late swap", for the Thanksgiving lineups |
+| "open thanksgiving" | `dfs week serve --slate thu` | the link it opened (a second page beside the main one) |
+
 ## Around the tables
 
 - **Iterating on Suggested:** `dfs lineups suggest --iterate` reads the tab (decisions, locks, typed names, rules box) and `data/suggest_state/<week>.json`; always say **which round** it produced and what changed. A plain `dfs lineups suggest` builds from scratch and replaces the tab (the previous round stays in the file: `--round N`). Edits made through chat go in the same cells, only on the live week's sheet.
