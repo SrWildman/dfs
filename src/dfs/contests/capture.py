@@ -19,6 +19,7 @@ import hashlib
 import re
 import shutil
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -95,6 +96,9 @@ class StandingsCapture:
     moved: list[tuple[Path, list[str]]] = field(default_factory=list)  # (new location, contest ids)
     already: list[tuple[Path, list[str]]] = field(default_factory=list)  # left in place: ids already kept
     empty: list[Path] = field(default_factory=list)  # 0-byte (failed or expired download), left in place
+    # A secondary slate's standings (`slate_close.standings_divert`): kept apart, never in `dest_dir`.
+    diverted: list[tuple[Path, list[str]]] = field(default_factory=list)
+    mixed: list[tuple[Path, list[str]]] = field(default_factory=list)  # both slates in one zip: left in place
 
     @property
     def new_ids(self) -> list[str]:
@@ -146,8 +150,14 @@ def candidate_standings(folder: Path) -> list[Path]:
     return sorted(found, key=lambda p: (p.stat().st_mtime, p.name))
 
 
-def capture_standings(downloads: Path, dest_dir: Path) -> StandingsCapture:
-    """Moves every new standings download into `dest_dir`; reports the empty and the already-kept ones."""
+def capture_standings(
+    downloads: Path, dest_dir: Path, divert: Callable[[str], Path | None] | None = None
+) -> StandingsCapture:
+    """Moves every new standings download into `dest_dir`; reports the empty and the already-kept ones.
+
+    `divert` (a contest id -> another folder, or None) keeps a secondary slate's standings out of `dest_dir`
+    (`slate_close.standings_divert`): a file whose contests all divert to one folder is moved there instead;
+    a zip mixing the two is left in Downloads and reported. Left out, nothing changes."""
     result = StandingsCapture()
     dest_dir = Path(dest_dir)
     kept = _kept_ids(dest_dir)
@@ -163,6 +173,14 @@ def capture_standings(downloads: Path, dest_dir: Path) -> StandingsCapture:
                 result.empty.append(path)
                 continue
             ids = [STANDINGS_CSV.match(path.name).group(1)]  # type: ignore[union-attr]
+        if divert is not None:
+            away = {divert(cid) for cid in ids}
+            if away != {None}:
+                if None in away or len(away) > 1:
+                    result.mixed.append((path, ids))
+                else:
+                    _move_apart(path, ids, Path(next(iter(away))), result)  # type: ignore[arg-type]
+                continue
         if all(cid in kept for cid in ids):
             result.already.append((path, ids))
             continue
@@ -175,6 +193,20 @@ def capture_standings(downloads: Path, dest_dir: Path) -> StandingsCapture:
         kept.update(ids)
         result.moved.append((target, ids))
     return result
+
+
+def _move_apart(path: Path, ids: list[str], folder: Path, result: StandingsCapture) -> None:
+    """A secondary slate's standings file into its own folder (left in place when already kept there)."""
+    if all(cid in _kept_ids(folder) for cid in ids):
+        result.already.append((path, ids))
+        return
+    folder.mkdir(parents=True, exist_ok=True)
+    target, n = folder / path.name, 1
+    while target.exists():
+        n += 1
+        target = folder / f"{path.stem}-{n}{path.suffix}"
+    shutil.move(str(path), str(target))
+    result.diverted.append((target, ids))
 
 
 def standings_bytes(path: Path) -> list[tuple[str, bytes]]:
@@ -200,10 +232,20 @@ def describe(report: StandingsCapture) -> list[str]:
         lines.append(f"  kept standings {path.name} (contest {', '.join(ids)}) in {path.parent}")
     for path, ids in report.already:
         lines.append(f"  already kept: {path.name} (contest {', '.join(ids)}); left in Downloads")
+    for path, ids in report.diverted:
+        lines.append(
+            f"  kept apart: {path.name} (contest {', '.join(ids)}) is a secondary slate's, in {path.parent}; "
+            "the main slate's learning never reads it"
+        )
+    for path, ids in report.mixed:
+        lines.append(
+            f"  NOT kept: {path.name} (contests {', '.join(ids)}) mixes the main slate with a secondary one; "
+            "left in Downloads"
+        )
     for path in report.empty:
         lines.append(
             f"  EMPTY download, skipped: {path.name} (a failed or expired export). {STANDINGS_EXPIRY_NOTE}"
         )
-    if not (report.moved or report.already or report.empty):
+    if not (report.moved or report.already or report.empty or report.diverted or report.mixed):
         lines.append(f"  no standings files in Downloads. {STANDINGS_EXPIRY_NOTE}")
     return lines

@@ -119,6 +119,36 @@ def _run_lock_for(root: Any, argv: list[str]):
     return held()
 
 
+def _slate_for(root: Any, argv: list[str]):
+    """The slate the command works on (`slate.py`: `--slate`, else `DFS_SLATE`, else main), held for the whole
+    command. A command that is not built for a secondary slate refuses one here, before it runs: a printed
+    reason and exit code 1 (the default deny that keeps the main slate's records clean)."""
+    from contextlib import contextmanager
+
+    from dfs import slate
+
+    @contextmanager
+    def held():
+        try:
+            key = slate.from_args(argv)
+        except slate.SlateError as e:
+            print(str(e), file=sys.stderr)
+            raise SystemExit(1) from None
+        if key != slate.MAIN:
+            try:
+                command = runlog.command_from_args(root, argv)
+            except Exception:  # noqa: BLE001 - unclassifiable: refuse rather than guess
+                command = "dfs ?"
+            why = slate.refusal(command, key)
+            if why is not None:
+                print(why, file=sys.stderr)
+                raise SystemExit(1)
+        with slate.active(key):
+            yield key
+
+    return held()
+
+
 class PromptingGroup(TyperGroup):
     """A Typer group whose leaf commands ask for missing required parameters (see module docstring). The
     top-level one is also the entry point that writes the run log (`runlog.py`)."""
@@ -127,7 +157,7 @@ class PromptingGroup(TyperGroup):
         argv = kwargs["args"] if "args" in kwargs else (args[0] if args else None)
         argv = list(sys.argv[1:] if argv is None else argv)
         try:
-            with _run_lock_for(self, argv):
+            with _slate_for(self, argv), _run_lock_for(self, argv):
                 return self._main_logged(argv, *args, **kwargs)
         except _LockRefused:
             raise SystemExit(1) from None

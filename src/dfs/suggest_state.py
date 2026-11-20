@@ -539,8 +539,15 @@ class StateFile:
         return (self.rounds[-1].round + 1) if self.rounds else 1
 
 
+def state_dir() -> Path:
+    """`data/suggest_state/`; a secondary slate's own `data/slates/<key>/suggest_state/` (`slate.py`)."""
+    from dfs import slate
+
+    return slate.path(STATE_DIR, "suggest_state")
+
+
 def state_path(week: int) -> Path:
-    return STATE_DIR / f"{week}.json"
+    return state_dir() / f"{week}.json"
 
 
 def load_state(week: int) -> StateFile:
@@ -602,7 +609,7 @@ def missing_history_note(week: int) -> str:
     """
     if state_path(week).exists():
         return ""
-    if (STATE_DIR / f"{POLLUTED_PREFIX}{week}.json").exists():
+    if (state_dir() / f"{POLLUTED_PREFIX}{week}.json").exists():
         return (
             f"Week {week} has no suggest history: its file was test output and was moved aside "
             f"({POLLUTED_PREFIX}{week}.json)"

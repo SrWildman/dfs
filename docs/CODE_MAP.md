@@ -28,6 +28,21 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   Read-only commands (status, doctor, week page, ...; `run_lock.READ_ONLY`) never take it; a dead owner's lock is replaced; a run removes the file as it ends (normally, failing or Ctrl-C); a `dfs`
   started by the holder (`week close --research`'s children) passes. A new command must be added to one of the two sets (a test fails).
 
+- **A second slate in one week** (`slate.py`, `slate_close.py`; Thanksgiving first, `docs/WORKFLOW.md`): a slate key
+  (`main`, or a day: `thu`, `fri`, `sat`, ...) chosen by `--slate` or `DFS_SLATE`, read by the CLI entry point
+  (`prompt_missing.PromptingGroup.main`, before the run lock) and held for the whole command (`slate.active`). Only
+  `slate.SLATE_COMMANDS` take it (a test checks the `--slate` options match); every other command refuses a secondary
+  slate before it runs. A secondary slate's sheet is `[slates.<key>] sheet_id` (`config.load_config` hands it out as
+  `google_sheets.sheet_id`; `config.load_base_config` is the file as written), and its files are under
+  `data/slates/<key>/`, laid out like `data/` (`slate.root` / `slate.path`): `store.current_dir` / `raw_dir` /
+  `manifest_file`, `pool_store.pool_dir`, `suggest_state.state_dir`, `entered.record_path`,
+  `late_swap_store._store_dir`, `signals_data.signals_dir`, `news_store.changes_path` / `edge_dir`,
+  `runlog.runlog_path`, `week_inputs.data_root` (so the page, its pidfile, chats, jobs and edits follow). Main's
+  paths are exactly what they were. Its salaries: `sources.dk_salaries.pick_slate_draft_group` (the largest Classic
+  group all on the slate's day, Eastern time). The close: `slate_close` keeps a secondary slate's contests out of
+  Results and its standings out of `data/raw/dk_standings/` (`contests.capture.capture_standings(divert=...)`).
+  Tests: `tests/test_slate.py`, `tests/test_slate_close.py`, `tests/sources/test_dk_salaries_slates.py`.
+
 ## Sync, sources and the news log
 
 - **The news change log** (`news_log.py` pure, `news_store.py` I/O; blueprint Phase C item 1): every `dfs sync`, `dfs sync --live` and

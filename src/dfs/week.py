@@ -151,7 +151,20 @@ def parse_week_from_title(title: str) -> int:
     doesn't parse -- that fallback is exactly how this broke. The
     template's own title ("Template") correctly raises here too: nobody
     should be running a bankroll close against it.
+
+    On a secondary slate (`slate.py`) the title is "Week <n> <name>" ("Week 12 Thanksgiving") and a plain
+    "Week <n>" (a main sheet's title) raises; on the main slate nothing changed.
     """
+    from dfs import slate
+
+    if not slate.is_main():
+        found = slate.title_week(title)
+        if found is None:
+            raise ValueError(
+                f'Sheet title {title!r} is not a {slate.label()} slate sheet\'s ("Week <n> <name>", e.g. '
+                '"Week 12 Thanksgiving"): a plain "Week <n>" is the main slate\'s sheet.'
+            )
+        return found
     match = _WEEK_TITLE_RE.match(title.strip())
     if not match:
         raise ValueError(
@@ -193,6 +206,40 @@ def resolve_week_title(current_title: str, resolved_week: int) -> WeekTitleResol
             f"derived week is {resolved_week}."
         )
     return WeekTitleResolution(target_title=target_title, needs_rename=current_title != target_title)
+
+
+def rewrite_slate_sheet_id(config_text: str, *, key: str, new_sheet_id: str) -> str:
+    """Set `[slates.<key>] sheet_id = "<new_sheet_id>"` in config.toml's text (`slate.py`): replace the line
+    in
+    that table when it exists, else append the table at the end. Nothing else changes, and the result is
+    checked: it must still parse, keep `[google_sheets] sheet_id` (and `previous_sheet_id`) exactly as they
+    were, and hold the new id. Raises ValueError otherwise."""
+    import tomllib
+
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", new_sheet_id):
+        raise ValueError(f"{new_sheet_id!r} is not a sheet id.")
+    before = tomllib.loads(config_text)
+    header = re.compile(rf"^\[slates\.{re.escape(key)}\]\s*$", re.MULTILINE)
+    found = header.search(config_text)
+    line = f'sheet_id = "{new_sheet_id}"'
+    if found is None:
+        updated = config_text.rstrip("\n") + f"\n\n[slates.{key}]\n{line}\n"
+    else:
+        start = found.end()
+        nxt = re.search(r"^\[", config_text[start:], re.MULTILINE)
+        end = start + nxt.start() if nxt else len(config_text)
+        table = config_text[start:end]
+        if _SHEET_ID_LINE_RE.search(table):
+            table = _SHEET_ID_LINE_RE.sub(line, table, count=1)
+        else:
+            table = f"\n{line}" + table
+        updated = config_text[:start] + table + config_text[end:]
+    after = tomllib.loads(updated)
+    if after.get("google_sheets") != before.get("google_sheets"):
+        raise ValueError("Rewriting [slates] would change [google_sheets]: not written.")
+    if after.get("slates", {}).get(key, {}).get("sheet_id") != new_sheet_id:
+        raise ValueError(f"[slates.{key}] sheet_id did not take: not written.")
+    return updated
 
 
 def rewrite_sheet_id(config_text: str, *, new_sheet_id: str, previous_sheet_id: str) -> str:

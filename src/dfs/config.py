@@ -354,6 +354,14 @@ class BuildsConfig(BaseModel):
     solver: Literal["search", "exact", "milp"] = "search"
 
 
+class SlateSheetConfig(BaseModel):
+    """`[slates.<key>]`: a secondary slate's sheet (`slate.py`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sheet_id: str
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -372,6 +380,19 @@ class Config(BaseModel):
     builds: BuildsConfig = BuildsConfig()
     contest_plan: ContestPlanConfig = ContestPlanConfig()
     ledger: LedgerConfig = LedgerConfig()
+    # A secondary slate's own sheet, by slate key (`slate.py`): `[slates.thu] sheet_id = "..."`, written by
+    # `dfs week new --slate thu <url>`. Never the main slate's `google_sheets.sheet_id`.
+    slates: dict[str, SlateSheetConfig] = {}
+
+    @field_validator("slates")
+    @classmethod
+    def _known_slates(cls, value: dict[str, SlateSheetConfig]) -> dict[str, SlateSheetConfig]:
+        from dfs import slate
+
+        for key in value:
+            if key == slate.MAIN or key not in slate.KEYS:
+                raise ValueError(f"[slates.{key}]: a secondary slate is one of {', '.join(slate.DAYS)}")
+        return value
 
 
 def _missing_config_message() -> str:
@@ -383,8 +404,43 @@ def _missing_config_message() -> str:
     )
 
 
-@lru_cache(maxsize=1)
 def load_config() -> Config:
+    """config.toml, as the running command's slate sees it (`slate.py`). On the main slate this is exactly the
+    file (the same cached object as always); on a secondary slate, `google_sheets.sheet_id` is that slate's
+    `[slates.<key>] sheet_id` and `previous_sheet_id` is None, so nothing it runs can reach a main sheet."""
+    from dfs import slate
+
+    cfg = load_base_config()
+    key = slate.current()
+    return cfg if key == slate.MAIN else for_slate(cfg, key)
+
+
+def for_slate(cfg: Config, key: str) -> Config:
+    """`cfg` pointed at slate `key`'s own sheet. Raises ConfigError when the slate has no sheet yet, or when
+    its
+    sheet is one of the main slate's."""
+    entry = cfg.slates.get(key)
+    if entry is None:
+        raise ConfigError(
+            f"No sheet for the {key} slate yet: copy the template, share it with the service account, then "
+            f'`dfs week new --slate {key} "<url>"`.'
+        )
+    gs = cfg.google_sheets
+    if entry.sheet_id in {gs.sheet_id, gs.previous_sheet_id}:
+        raise ConfigError(
+            f"[slates.{key}] sheet_id is the main slate's sheet: a secondary slate needs its own copy."
+        )
+    return cfg.model_copy(
+        update={
+            "google_sheets": gs.model_copy(update={"sheet_id": entry.sheet_id, "previous_sheet_id": None})
+        }
+    )
+
+
+@lru_cache(maxsize=1)
+def load_base_config() -> Config:
+    """config.toml as written, whatever slate is active (`dfs week new --slate` reads the main sheet's id here
+    to refuse it)."""
     if not CONFIG_FILE.exists():
         raise ConfigError(_missing_config_message())
 
@@ -398,6 +454,9 @@ def load_config() -> Config:
         return Config.model_validate(raw)
     except ValidationError as e:
         raise ConfigError(f"config.toml is invalid:\n{e}") from e
+
+
+load_config.cache_clear = load_base_config.cache_clear  # type: ignore[attr-defined] - callers clear it after a rewrite
 
 
 if __name__ == "__main__":  # pragma: no cover

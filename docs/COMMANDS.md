@@ -44,6 +44,10 @@ Not part of the six steps above, but handy: checking where you are, a quick look
 
 Show whether config is set up and how fresh each data source is.
 
+| Option | What it does |
+|---|---|
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
+
 ### `dfs week page`
 
 Write one self-contained HTML page for the week and open it: today's steps (with the phrase to say and the command), then the week's plays by position (best value, cash core, GPP upside, fades), the slate (every game's total, spread, implied totals, line movement, weather, key injuries), what changed since the last sync, and each decision answered from outputs the tool already saved (the contest plan by tier, cash, GPP, unknowns, Sunday, the season-long leagues, last week), each with its trust (Proven / Shadow / Untested), ordered by the day of the week, and every command and phrase with when you last ran it. Read-only: no sheet, no network. A section whose input does not exist says "not run yet". `sync`, `lineups suggest`, `lineups late-swap`, `contests plan`, `season sync`, `season check` and `week close` rebuild it when they finish.
@@ -52,6 +56,7 @@ Write one self-contained HTML page for the week and open it: today's steps (with
 |---|---|
 | `--week INT` | Build the page for this week (default: the current week). |
 | `--open` | Open the page in your browser (default: open it). Default: `True`. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs week serve`
 
@@ -64,6 +69,7 @@ Serve the Week page on this Mac only (127.0.0.1, a random token in the link it o
 | `--open` | Open the page in your browser (default: open it). Default: `True`. |
 | `--sheet-id STR` | Read and write this sheet instead of config.toml's (a test copy). The page's writes go here. |
 | `--stop` | Stop the running Week server (SIGTERM to the pid in data/week/serve.pid). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs doctor`
 
@@ -72,6 +78,7 @@ Read-only structural check: every tab named in config.toml exists, EdgeRaw's hea
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Check a different sheet instead of config.toml's -- e.g. a freshly made weekly copy or the canonical template, before pointing anything at it. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs week new`
 
@@ -82,10 +89,11 @@ Move config.toml to a new week's sheet copy: check the new sheet's structure (`d
 | `sheet_url STR` | URL (or bare ID) of this week's sheet, already copied from the template. **Required.** |
 | `--week INT` | Override the auto-detected NFL week used to title the new sheet. |
 | `--yes / -y` | Skip the confirmation prompt. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs sync`
 
-Fetch data sources and upload them to the connected Google Sheet.
+Fetch data sources and upload them to the connected Google Sheet. With `--slate thu` (a secondary slate): that slate's DraftKings draft group and its own sheet and files; player props are not pulled.
 
 | Option | What it does |
 |---|---|
@@ -97,6 +105,7 @@ Fetch data sources and upload them to the connected Google Sheet.
 | `--sheet-id STR` | Write to this sheet instead of config.toml's (e.g. the template). |
 | `--props` | Player props from The Odds API (about 6 credits a game, see docs/WORKFLOW.md). A plain full sync pulls them ONCE per NFL week, on the first full sync of a Saturday or Sunday. With --live this refreshes only the games whose players' DraftKings status changed since the last pull (nothing spent if none did); on a full sync it forces a pull. A plain --live never spends credits, and every pull must fit the budget (credits left / NFL weekends before the monthly reset). |
 | `--fixed-lines` | Score against the old FIXED lines (your season-median typed Cash Line, and [sim] gpp_target) instead of lines that move with the slate (the field's average score plus a margin, [sim.lines]). Kept for one season so the old and new numbers can be compared. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs lineups suggest`
 
@@ -115,6 +124,7 @@ Build complete lineups from your Player Pool and write them to the Suggested tab
 | `--iterate` | Rerun around what you decided on the Suggested tab: Keep / Rebuild / Drop / Vary N on each build, the lock ticks, names you typed over a player (they count as locks) and the rules box. Kept builds are only rescored; rebuilt and new ones are searched (about 15 s). --cash / --gpp are ignored: the rules box's Builds wanted line says how many. |
 | `--round INT RANGE` | Bring an earlier round back: its builds, locks, decisions and rules, rescored and written as a new round (the state is kept in data/suggest_state/<week>.json). |
 | `--only CHOICE` | With --iterate: rerun only this kind of build. `cash` searches the Default cash lineup again around the rules box (what the Week page's open-spot pick runs) and leaves every GPP build as is; `gpp` leaves the cash builds as they are. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs stacks`
 
@@ -152,6 +162,7 @@ Fill DraftKings' entries file from the lineups you chose on the DK Upload tab.
 | `--again` | After a late swap changed a lineup: rewrite only the entries whose lineup now differs from the slots on DK Upload. Nothing else on the tab changes. |
 | `--dry-run` | Read and report only: write neither the DK Upload tab nor a file. |
 | `--sheet-id STR` | Use a different sheet instead of config.toml's (e.g. the template). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs entries print`
 
@@ -162,6 +173,7 @@ Print every lineup on the Lineups tab in DraftKings' `Name (ID)` slot format, an
 | `--csv PATH` | Path to a DraftKings entries file. Left out, the newest one in your Downloads folder is used (found by its header row) and the command says which. |
 | `--output / -o PATH` | Where to write the file (default: dk_lineups_<timestamp>.csv here). |
 | `--sheet-id STR` | Read a different sheet instead of config.toml's. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs entries record`
 
@@ -174,6 +186,7 @@ Record what you entered this week, at lock: every lineup, its contest(s), and wh
 | `--sheet-id STR` | Read a different sheet instead of config.toml's. |
 | `--dry-run` | Print the record; write no file. |
 | `--h2h CHOICE` | This week's H2Hs: ones you posted, joined, or both (the ledger's H2H line). Left out at a terminal with H2H entries, it asks once; never when piped. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs export`
 
@@ -182,6 +195,7 @@ Validate paired lineups in the lineups tab and export DK's upload CSV.
 | Option | What it does |
 |---|---|
 | `--output / -o PATH` | Path to write the DK bulk-upload CSV. **Required.** |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs lineups late-swap`
 
@@ -197,6 +211,7 @@ Check every built lineup in the Lineups tab against real kickoff times, then sug
 | `--field STR` | Score swaps against the REAL field of a live contest: the standings export you downloaded by hand after the 1 pm lock (DraftKings > the contest > export full standings). Pass a file (repeat for a Double Up and a GPP), or `auto` for the newest live exports in your Downloads folder (this week's, found by their content; the entries file there says each contest's format). Without it, swaps are scored against the projected-ownership line. |
 | `--state CHOICE` | Where the games' state comes from. `live` (the default once a game has started): every started player's points so far from ESPN's public box scores (no download from DraftKings), swaps scored against the projected-ownership line on that state: the games already played are known, the rest simulated. If ESPN cannot be read it says so loudly and scores on projections alone. `projected`: ignore the games played (the old default). --field replaces it with the real contest export. |
 | `--refresh-injuries` | Lay ESPN's game-day injury feed over the last sync's Avail first (Out, IR, Doubtful and Questionable only escalate a status, never clear one), and list what changed. Use it in the late window, after news breaks. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs week close`
 
@@ -227,6 +242,7 @@ Set EdgeRaw's Pool column to "Both" for each name given, by exact match if one e
 | Option | What it does |
 |---|---|
 | `names STR` | Player name(s) or substrings to add. **Required.** |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs pool remove`
 
@@ -235,10 +251,15 @@ Clear EdgeRaw's Pool column for each name given -- same matching rules as `dfs p
 | Option | What it does |
 |---|---|
 | `names STR` | Player name(s) or substrings to remove. **Required.** |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs pool list`
 
 Every currently-pooled EdgeRaw player, grouped by position.
+
+| Option | What it does |
+|---|---|
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs pool clear`
 
@@ -247,6 +268,7 @@ Clear every currently-pooled EdgeRaw player. Confirms first unless `--yes` is gi
 | Option | What it does |
 |---|---|
 | `--yes / -y` | Skip the confirmation prompt. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs odds movement`
 
@@ -369,6 +391,7 @@ Clear last week's typed-in lineup data (Lineups/Player Pool name columns, DK Upl
 |---|---|
 | `--yes / -y` | Skip the confirmation prompt. |
 | `--sheet-id STR` | Clear a different sheet instead of config.toml's -- e.g. a fresh weekly copy or the canonical template, before pointing config.toml at it. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs auth tffb`
 

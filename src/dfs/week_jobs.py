@@ -385,7 +385,9 @@ class JobRunner:
 
     @property
     def history_path(self) -> Path:
-        return self._history_path or paths.DATA_DIR / "week" / "jobs.jsonl"
+        from dfs import slate
+
+        return self._history_path or slate.root() / "week" / "jobs.jsonl"
 
     # -- starting
     def start(self, command: str, values: dict[str, Any] | None = None, confirm: str = "") -> Job:

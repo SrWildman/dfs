@@ -16,6 +16,11 @@ credentials_file = "credentials.json"
 # again. Not something you should set by hand.
 # previous_sheet_id = "..."
 
+# A second Classic slate in one week (Thanksgiving = thu, a Saturday = sat, Christmas = fri) has its own
+# sheet, a copy of the template. Set by `dfs week new --slate thu "<url>"`; never the sheet_id above.
+# [slates.thu]
+# sheet_id = "the-thanksgiving-copy-id"
+
 # Maps each data source to the tab name it should be written to in your
 # sheet. Rename the values (right-hand side) to match your own tabs --
 # the keys (left-hand side) must stay as-is, they're the source names.

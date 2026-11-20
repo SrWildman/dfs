@@ -52,12 +52,36 @@ NEWS_WINDOW = timedelta(hours=24)  # Saturday's News item before a build: the la
 # -- the header ------------------------------------------------------------------------------------------------
 
 
+def day_tabs() -> tuple[tuple[str, str], ...]:
+    """The day views' labels: Saturday / Sunday / Tuesday on the main slate; on a secondary slate (`slate.py`)
+    the day before it, its own day and After (the views are the same three, timed off its own kickoffs)."""
+    from dfs import slate
+
+    if slate.is_main():
+        return DAYS
+    day = slate.DAYS[slate.current()]
+    return (
+        ("build", slate.DAY_NAMES.get((day - 1) % 7, "Before")),
+        ("lock", slate.DAY_NAMES[day]),
+        ("close", "After"),
+    )
+
+
+def slate_badge() -> str:
+    """` · Thursday slate` beside the week on a secondary slate's page; "" on the main slate."""
+    from dfs import slate
+
+    if slate.is_main():
+        return ""
+    return f' <b class="slate">· {e(slate.DAY_NAMES[slate.DAYS[slate.current()]])} slate</b>'
+
+
 def header_html(inp: WeekInputs, clock_state: str, live: bool, meta: str, stale: str) -> str:
     tabs = "".join(
         f'<a href="#{k}" data-view="{k}"{" class=on" if k == clock_state else ""}>{e(label)}'
         + ('<span class="now" title="Today, by the clock"></span>' if k == clock_state else "")
         + "</a>"
-        for k, label in DAYS
+        for k, label in day_tabs()
     )
     ask = (
         '<button type="button" class="askbtn" id="ask-open" title="Open the chat">Ask Claude</button>'
@@ -65,7 +89,7 @@ def header_html(inp: WeekInputs, clock_state: str, live: bool, meta: str, stale:
         else ""
     )
     return (
-        f'<header class="wk-top"><div class="wk">Week {inp.week}<span>{e(kickoff.format_et(inp.now))}</span></div>'
+        f'<header class="wk-top"><div class="wk">Week {inp.week}{slate_badge()}<span>{e(kickoff.format_et(inp.now))}</span></div>'
         f'<nav id="views" class="daytabs" aria-label="Day views">{tabs}</nav>'
         '<div class="wk-tools"><span class="vsearch"><input id="psearch" type="search" placeholder="Find a player  /" '
         'autocomplete="off" aria-label="Find a player"><span id="psearch-list" class="srlist" hidden></span></span>'

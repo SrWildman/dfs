@@ -121,6 +121,14 @@ More view and on Everything.
 
 ## The local app: `dfs week serve`
 
+- `--slate thu` (a secondary slate, `slate.py`): that slate's page, beside the main one, from `data/slates/thu/`
+  (`week_inputs.data_root`), with its own pidfile, log, chats, jobs and edits log there. The header says "Week N ·
+  Thursday slate" and the day tabs are the day before, its day and After (`week_shell.day_tabs`), timed off its own
+  first kickoff (`lock_state` reads the slate's EdgeRaw); the Lock baseline with no build is 9 pm ET the night
+  before (`lock_state.saturday_night`). The server sets `DFS_SLATE`, so the chat's and the buttons' `dfs` commands
+  work on the same slate, and the chat's prompt opens with a paragraph saying so (`week_chat.slate_note`). With no
+  `--slate` nothing on the page changes.
+
 - `dfs week serve [--week N] [--port P] [--no-open] [--sheet-id <id>] [--stop]` -- **the Week page as a local app** (`week_server.py`;
   the static `dfs week page` is unchanged): serves the page on this Mac only (`127.0.0.1`; the link it opens carries a
   random token, and every request needs the token and a localhost `Host`), with **Claude Code beside it** (folded on every load until **Ask Claude** opens it)

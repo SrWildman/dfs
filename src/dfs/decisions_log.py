@@ -40,7 +40,9 @@ STATES = ("build", "lock", "late")
 
 
 def _path(path: Path | None) -> Path:
-    return path or PATH
+    from dfs import slate
+
+    return path or slate.path(PATH, "week", "decisions.jsonl")
 
 
 def _now() -> str:

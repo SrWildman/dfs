@@ -24,7 +24,12 @@ HEADER = ["time", "command", "ok"]
 
 
 def runlog_path() -> Path:
-    return paths.DATA_DIR / "runlog.csv"
+    """`data/runlog.csv`; a secondary slate's runs go to its own (`slate.py`), so the main slate's page never
+    counts a Thanksgiving sync as its own."""
+    from dfs import slate
+
+    main = paths.DATA_DIR / "runlog.csv"
+    return main if slate.is_main() else slate.root() / "runlog.csv"
 
 
 @dataclass(frozen=True)

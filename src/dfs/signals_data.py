@@ -40,9 +40,17 @@ STATS_PLAYER_URL = _NFLVERSE + "/stats_player/stats_player_week_{season}.parquet
 STATS_TEAM_URL = _NFLVERSE + "/stats_team/stats_team_week_{season}.parquet"
 
 
+def signals_dir() -> Path:
+    """`data/signals/`; a secondary slate's own `data/slates/<key>/signals/` (`slate.py`): its archives never
+    reach the main slate's scoring or research."""
+    from dfs import slate
+
+    return slate.path(SIGNALS_DIR, "signals")
+
+
 def archive_path(season: int, week: int, stamp: str) -> Path:
     """`data/signals/signals_<season>_wNN_<stamp>.csv`."""
-    return SIGNALS_DIR / f"signals_{season}_w{week:02d}_{stamp}.csv"
+    return signals_dir() / f"signals_{season}_w{week:02d}_{stamp}.csv"
 
 
 def stamp_of(when: datetime) -> str:
@@ -57,7 +65,7 @@ def iso_of(when: datetime) -> str:
 
 def write_archive(players: pd.DataFrame, season: int, week: int, when: datetime) -> Path:
     """Write one archive for the slate as of `when`; returns its path."""
-    SIGNALS_DIR.mkdir(parents=True, exist_ok=True)
+    signals_dir().mkdir(parents=True, exist_ok=True)
     path = archive_path(season, week, stamp_of(when))
     players.assign(season=season, week=week).to_csv(path, index=False)
     return path
@@ -65,11 +73,12 @@ def write_archive(players: pd.DataFrame, season: int, week: int, when: datetime)
 
 def archive_files(season: int, week: int | None = None) -> list[tuple[datetime, Path]]:
     """Every archive for the season (or one week), oldest first."""
-    if not SIGNALS_DIR.exists():
+    folder = signals_dir()
+    if not folder.exists():
         return []
     pattern = f"signals_{season}_w{week:02d}_*.csv" if week is not None else f"signals_{season}_w*_*.csv"
     out = []
-    for path in sorted(SIGNALS_DIR.glob(pattern)):
+    for path in sorted(folder.glob(pattern)):
         stamp = path.stem.rsplit("_", 1)[-1]
         try:
             out.append((datetime.strptime(stamp, _STAMP_FORMAT).replace(tzinfo=UTC), path))
@@ -252,9 +261,9 @@ HEAVY_FIELDS = (
 
 
 def _heavy_cache() -> Path:
-    from dfs.paths import CURRENT_DIR
+    from dfs import store
 
-    return CURRENT_DIR / "signals_inputs.pkl"
+    return store.current_dir() / "signals_inputs.pkl"
 
 
 def _saved(name: str) -> pd.DataFrame | None:

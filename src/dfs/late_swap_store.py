@@ -179,12 +179,20 @@ def summarize(
     )
 
 
+def _store_dir() -> Path:
+    """`data/cockpit/`; a secondary slate's own `data/slates/<key>/cockpit/` (`slate.py`), so its late swap
+    never overwrites the main slate's `late_swap.json` nor joins its `late_swaps.jsonl`."""
+    from dfs import slate
+
+    return slate.path(STORE_DIR, "cockpit")
+
+
 def _path(directory: Path | None = None) -> Path:
-    return (directory or STORE_DIR) / STORE_FILE
+    return (directory or _store_dir()) / STORE_FILE
 
 
 def _runs_path(directory: Path | None = None) -> Path:
-    return (directory or STORE_DIR) / RUNS_FILE
+    return (directory or _store_dir()) / RUNS_FILE
 
 
 def to_json(saved: Saved) -> dict:
