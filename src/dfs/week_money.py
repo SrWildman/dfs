@@ -1083,8 +1083,8 @@ def ledger_line(inp: WeekInputs) -> tuple[str, bool]:
 
 LEDGER_CSS = """
 table.ledger svg.iv{display:block}
-table.ledger svg.iv .zero{stroke:var(--muted,#888);stroke-width:1}
-table.ledger svg.iv .band{fill:var(--ink,#333);opacity:.18}
-table.ledger svg.iv .m{fill:var(--ink,#333)}
+table.ledger svg.iv .zero{stroke:var(--ink-3);stroke-width:1}
+table.ledger svg.iv .band{fill:var(--ink);opacity:.18}
+table.ledger svg.iv .m{fill:var(--ink)}
 table.ledger td:nth-child(3){min-width:170px}
 """

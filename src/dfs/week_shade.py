@@ -95,9 +95,9 @@ GOOD_HEX, BAD_HEX, OWN_HEX = _hex(scs.GRAD_MAX), _hex(scs.GRAD_MIN), _hex(scs.BL
 
 CSS = (
     f":root{{--sh-good:{GOOD_HEX};--sh-bad:{BAD_HEX};--sh-own:{OWN_HEX}}}"
-    "@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--sh-good:#2f7a4c;--sh-bad:#8e3b34;"
-    "--sh-own:#9a6420}}"
-    ":root[data-theme=dark]{--sh-good:#2f7a4c;--sh-bad:#8e3b34;--sh-own:#9a6420}"
+    "@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--sh-good:#1a3f29;--sh-bad:#4a1f1b;"
+    "--sh-own:#44300f}}"
+    ":root[data-theme=dark]{--sh-good:#1a3f29;--sh-bad:#4a1f1b;--sh-own:#44300f}"
     "td.sh{background:color-mix(in srgb,var(--sh-c) calc(var(--sh-p)*1%),transparent)}"
     "td.sh.sh-good{--sh-c:var(--sh-good)}td.sh.sh-bad{--sh-c:var(--sh-bad)}td.sh.sh-own{--sh-c:var(--sh-own)}"
     "td.sh.sh-tail{font-weight:700}"

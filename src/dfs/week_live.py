@@ -57,7 +57,7 @@ border-bottom:1px solid var(--line)}
 #lockbar.busy{background:var(--flag);color:var(--ink)}
 #chat-log{flex:1;overflow-y:auto;padding:10px;font-size:14px}
 .msg{margin:0 0 10px;white-space:pre-wrap;word-break:break-word}
-.msg.user{background:rgba(31,94,255,.1);border-radius:8px;padding:6px 10px}
+.msg.user{background:var(--accent-soft);border-radius:8px;padding:6px 10px}
 .msg.error{color:var(--bad)}.msg.note{color:var(--dim);font-size:12.5px}
 #chat-log .chip{display:block;margin:0 0 8px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;
 padding:2px 8px;white-space:normal;font-weight:400;background:transparent;color:inherit}
@@ -69,8 +69,8 @@ max-height:220px;overflow:auto}
 .approval pre{white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,Menlo,monospace;
 max-height:200px;overflow:auto;margin:6px 0}
 .approval button{margin-right:8px;font:inherit;padding:3px 12px}
-.approval .allow{background:var(--proven);color:#fff;border:0;border-radius:5px}
-.approval .deny{background:var(--bad);color:#fff;border:0;border-radius:5px}
+.approval .allow{background:var(--proven);color:var(--on-fill);border:0;border-radius:5px}
+.approval .deny{background:var(--bad);color:var(--on-fill);border:0;border-radius:5px}
 #chat-input{border-top:1px solid var(--line);padding:8px 10px;display:flex;gap:6px;flex-direction:column}
 #chat-input textarea{width:100%;min-height:62px;font:inherit;resize:vertical;background:var(--bg);
 color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px}
@@ -80,16 +80,16 @@ color:var(--accent);background:transparent;border-radius:999px;cursor:pointer}
 .live-card button,.live-card select,.live-card input{font:inherit}
 .live-card input[type=text],.live-card select{background:var(--bg);color:var(--ink);border:1px solid var(--line);
 border-radius:5px;padding:3px 6px}
-.live-card button.primary{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:4px 14px;
+.live-card button.primary{background:var(--accent);color:var(--on-fill);border:0;border-radius:6px;padding:4px 14px;
 cursor:pointer}
 .live-card button:disabled{opacity:.5;cursor:not-allowed}
-.runbtn{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:3px 12px;cursor:pointer;
+.runbtn{background:var(--accent);color:var(--on-fill);border:0;border-radius:6px;padding:3px 12px;cursor:pointer;
 font:inherit;margin-left:6px}
 .confirm{margin:8px 0}.confirm button{margin-top:6px}
 .formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px;margin:8px 0}
 .formgrid label{display:flex;flex-direction:column;font-size:12.5px;color:var(--dim);gap:2px}
 .verdict{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0}
-.tier{display:inline-block;font-weight:700;border-radius:6px;padding:1px 10px;color:#fff;margin-right:6px}
+.tier{display:inline-block;font-weight:700;border-radius:6px;padding:1px 10px;color:var(--on-fill);margin-right:6px}
 .tier.A{background:var(--proven)}.tier.B{background:var(--accent)}.tier.C{background:var(--shadow)}
 .tier.Avoid{background:var(--bad)}
 .dropzone{border:2px dashed var(--line);border-radius:10px;padding:16px;text-align:center;color:var(--dim);
@@ -120,7 +120,7 @@ border-radius:6px;padding:4px 8px;margin:8px 0;word-break:break-word}
 font-size:13px;padding:3px 0;border-bottom:1px solid var(--line)}
 .runs .st{font-weight:700;min-width:52px}.runs .ok .st{color:var(--ok)}.runs .bad .st{color:var(--bad)}
 .runs code{flex:1 1 220px}.runs .t{color:var(--dim);font-size:12px}
-#run-out{background:#0f1115;color:#d7dae0;border-radius:8px;padding:10px;font:12px/1.4 ui-monospace,Menlo,
+#run-out{background:var(--sunk);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px;font:12px/1.4 ui-monospace,Menlo,
 monospace;max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:8px 0}
 @media(max-width:900px){body.live{display:block}#pagecol{height:auto;overflow:visible}
 #chat{position:fixed;right:0;top:0;width:100%;max-width:430px;z-index:25}#chat.collapsed{display:none}}
@@ -171,7 +171,7 @@ here, and asks you first.</span></div>
 <div id="lockbar">Nothing is running.</div>
 <div id="chat-log"></div>
 <div id="chat-input"><textarea id="chat-text" placeholder="Ask, or click Ask beside a step (Enter sends, Shift+Enter is a new line)"></textarea>
-<div class="row"><button class="primary live-card" id="chat-send" style="background:var(--accent);color:#fff;border:0;border-radius:6px;padding:4px 14px">Send</button>
+<div class="row"><button class="primary live-card" id="chat-send" style="background:var(--accent);color:var(--on-fill);border:0;border-radius:6px;padding:4px 14px">Send</button>
 <span class="note" id="chat-note"></span></div></div>
 </aside>
 """

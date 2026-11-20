@@ -26,8 +26,8 @@ module's expensive fixtures on one worker. Change a dependency in `pyproject.tom
 CI runs the lock-file install, `ruff check`, `ruff format --check` and `pytest --full` on every push/PR
 (`.github/workflows/ci.yml`). None of
 the tests need real credentials, a real sheet, or a browser -- they mock
-HTTP (`pytest-httpx`) and the Sheets client, and the Playwright tests (`browser`) skip themselves where Chromium is not
-installed. If a test you're adding needs any of those,
+HTTP (`pytest-httpx`) and the Sheets client, and the Playwright tests (`browser`, run in Chromium and Firefox) skip themselves where an
+engine is not installed (`playwright install chromium firefox`). If a test you're adding needs any of those,
 that's a sign the logic under test should be split into a pure function
 first (see "Sources" below).
 

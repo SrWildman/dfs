@@ -243,7 +243,10 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     for name, text in (
         ("slow", "takes about a second or more; skipped by a bare `pytest`, run by `--full`"),
-        ("browser", "drives Playwright's Chromium (also slow); skipped by a bare `pytest`, run by `--full`"),
+        (
+            "browser",
+            "drives Playwright in Chromium and Firefox (slow); left out of a bare `pytest`, run by `--full`",
+        ),
         ("exhaustive", "the long version of a property another test checks; run only by `--exhaustive`"),
     ):
         config.addinivalue_line("markers", f"{name}: {text}")
@@ -385,3 +388,26 @@ def _no_week_page_regeneration(monkeypatch):
     from dfs import week_page
 
     monkeypatch.setattr(week_page, "AUTO_REGENERATE", False)
+
+
+# The engines every browser test runs in (Sam, 2026-11-19): Chromium, and Firefox for Zen, the Firefox-based
+# browser Sam uses. `playwright install chromium firefox` enables them; an engine not installed is skipped.
+BROWSER_ENGINES = ("chromium", "firefox")
+
+
+@pytest.fixture(scope="module", params=BROWSER_ENGINES)
+def browser(request):
+    """A Playwright browser, once per engine: every test that takes it runs in Chromium and in Firefox."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        pw = sync_api.sync_playwright().start()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"no Playwright driver: {exc}")
+    try:
+        b = getattr(pw, request.param).launch()
+    except Exception as exc:  # noqa: BLE001 - no browser installed (CI)
+        pw.stop()
+        pytest.skip(f"{request.param} is not installed: {exc}")
+    yield b
+    b.close()
+    pw.stop()

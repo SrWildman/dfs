@@ -86,7 +86,8 @@ positions, never hardcode them.**
   fails an unmarked test over 3 s (mark it `@pytest.mark.slow` or make it faster). Naming a file runs all of it.
 - **Before every PR**, locally: `GITHUB_ACTIONS=true pytest --full -n 6 --dist loadfile` (CI runs the same; a
   green editing run proves nothing about the builder), `ruff check .` and `ruff format --check .`. No test needs
-  credentials, a real sheet, the network or a browser (Playwright tests skip without Chromium, as on CI).
+  credentials, a real sheet, the network or a browser (Playwright tests run in Chromium and Firefox, and skip
+  an engine not installed, as on CI).
 - CI installs from the tracked `uv.lock` (`uv sync --locked --extra dev`): after changing a dependency in
   `pyproject.toml`, run `uv lock` and commit both. A new worktree needs its own `.venv` the same way.
 - Don't start a full test run while another session's pytest or backtest is running (`pgrep -fl pytest`).

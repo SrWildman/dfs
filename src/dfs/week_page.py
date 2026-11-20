@@ -1232,8 +1232,8 @@ background:var(--proven-soft)}
 .step.done b::before{content:"✓ ";color:var(--proven)}
 .grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:14px;align-items:start}
 .brief ul{margin:4px 0 8px;padding-left:20px}.brief li{margin:5px 0}
-.next-btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:7px 16px;font:inherit;
-font-weight:600;cursor:pointer}
+.next-btn{background:var(--accent);color:var(--on-fill);border:0;border-radius:7px;padding:7px 16px;
+font:inherit;font-weight:600;cursor:pointer}
 .nextline{margin:8px 0 0}
 button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--card);color:var(--ink);
 border-radius:6px;padding:3px 9px;cursor:pointer}
@@ -1282,7 +1282,7 @@ currentColor;line-height:1.3}
 font-size:12px;
 margin-left:-1px}.seg button:first-child{border-radius:6px 0 0 6px;margin-left:0}
 .seg button:last-child{border-radius:0 6px 6px 0}
-.seg button.on{background:var(--accent);color:#fff;border-color:var(--accent);opacity:1}
+.seg button.on{background:var(--accent);color:var(--on-fill);border-color:var(--accent);opacity:1}
 .seg.busy{opacity:.5;pointer-events:none}
 .showmore{border:0;color:var(--accent);background:transparent;padding:2px 0}
 .chart{display:block;width:100%;height:auto;max-width:100%}
@@ -1314,7 +1314,7 @@ white-space:nowrap}
 color:var(--accent)}.tag.moved{background:var(--bad-soft);color:var(--bad)}
 .lenses{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
 .lenses button.on,.ex-bar button.on{background:var(--accent);
-color:#fff;border-color:var(--accent)}
+color:var(--on-fill);border-color:var(--accent)}
 .ex-filters{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:flex-end;margin:8px 0}
 .ex-filters label{display:flex;flex-direction:column;font-size:12px;color:var(--dim);gap:2px}
 .ex-filters select,.ex-filters input{font:inherit;font-size:13px;background:var(--bg);color:var(--ink);
@@ -1332,7 +1332,7 @@ table.ex tr.groups th{top:0;cursor:default;color:var(--ink);border-left:1px soli
 table.ex td{white-space:nowrap;padding:4px 10px 4px 0}table.ex tr.pos td{background:var(--bg);font-weight:700;
 font-size:12px}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(440px,100%);background:var(--card);
-border-left:1px solid var(--line);box-shadow:-6px 0 18px rgba(0,0,0,.12);overflow-y:auto;
+border-left:1px solid var(--line);box-shadow:var(--pop);overflow-y:auto;
 padding:12px 16px 30px;
 z-index:20}
 .dhead{display:flex;justify-content:space-between;align-items:center}.dclose{font-size:20px;line-height:1;
@@ -1350,7 +1350,7 @@ h2.sec{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--
 .notrun{color:var(--dim)}.trust{font-size:13px;color:var(--dim);margin:10px 0 0;
 border-top:1px dashed var(--line);
 padding-top:8px}
-code{font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:rgba(127,127,127,.14);
+code{font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--sunk);
 padding:1px 5px;
 border-radius:4px}
 code.say{background:var(--accent-soft);color:var(--accent)}
@@ -1366,7 +1366,7 @@ table.tools td:nth-child(3){min-width:260px}table.tools code{white-space:normal;
 .urgent{border:2px solid var(--bad);border-radius:8px;padding:6px 12px;margin:6px 0 10px;color:var(--bad)}
 .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--ink);color:var(--card);
 padding:8px 14px;border-radius:8px;font-size:14px;z-index:30;max-width:90vw}
-.toast.bad{background:var(--bad);color:#fff}
+.toast.bad{background:var(--bad);color:var(--on-fill)}
 footer{max-width:2400px;margin:0 auto;padding:6px 16px 30px;color:var(--dim);font-size:12.5px}
 .chart.bank{max-width:760px}.chart .line{fill:none;stroke-width:2}
 .chart .zero{stroke:var(--dim);stroke-width:1}

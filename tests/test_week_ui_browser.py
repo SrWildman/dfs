@@ -1,9 +1,10 @@
-"""Plan N's page items in a real browser (Playwright's Chromium), against the served page on a fake sheet: the
-page state across a refresh and a reload, one pool store, the bulk write with a conflicting cell, the queue,
-the chart viewer (zoom, box, lasso, hover), the game view's writes and the chat toggle remembered.
+"""Plan N's page items in a real browser (Playwright's Chromium and Firefox: the `browser` fixture in
+`conftest.py`), against the served page on a fake sheet: the page state across a refresh and a reload, one
+pool store, the bulk write with a conflicting cell, the queue, the chart viewer (zoom, box, lasso, hover), the
+game view's writes and the chat toggle remembered.
 
-Skipped where Chromium is not installed (CI runs no browser; `playwright install chromium` enables these
-locally). Nothing here touches a real sheet: the server writes a `FakeSheet`."""
+Skipped where an engine is not installed (CI runs no browser; `playwright install chromium firefox` enables
+these locally). Nothing here touches a real sheet: the server writes a `FakeSheet`."""
 
 from __future__ import annotations
 
@@ -20,28 +21,12 @@ from tests.test_week_plays import row, write_csv
 from tests.test_week_server import stub_python
 from tests.test_week_writes import FakeSheet
 
-# Playwright's Chromium: also slow; a bare `pytest` leaves the file out, `--full` runs it.
+# Playwright (Chromium and Firefox): also slow; a bare `pytest` leaves the file out, `--full` runs it.
 pytestmark = [pytest.mark.browser, pytest.mark.slow]
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
 EDGE = "EdgeRaw"
-
-
-@pytest.fixture(scope="module")
-def browser():
-    try:
-        pw = sync_api.sync_playwright().start()
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"no Playwright driver: {exc}")
-    try:
-        b = pw.chromium.launch()
-    except Exception as exc:  # noqa: BLE001 - no browser installed (CI)
-        pw.stop()
-        pytest.skip(f"Chromium is not installed: {exc}")
-    yield b
-    b.close()
-    pw.stop()
 
 
 class Served:

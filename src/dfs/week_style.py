@@ -18,25 +18,46 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 
-TOKENS = """
-:root{--bg:#f5f6f8;--surface:#fff;--sunk:#f0f2f5;--line:#e3e6ea;--line-2:#d3d8de;
---ink:#16191d;--ink-2:#4d5560;--ink-3:#737b86;--accent:#1f56d6;--accent-soft:#e9effc;
---good:#17784a;--good-soft:#e7f4ec;--warn:#9a5b00;--warn-soft:#fdf3e2;--bad:#b4312a;--bad-soft:#fbeceb;
---cash:#1f56d6;--gpp:#7a3fc4;--gpp-soft:#f1eafa;--elev:0 1px 2px rgba(20,25,30,.05);
---wr:#1f56d6;--rb:#17784a;--te:#9a5b00;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;
---font:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#111316;--surface:#191c20;--sunk:#202429;
---line:#2a2f35;--line-2:#363c44;--ink:#e8eaed;--ink-2:#aab1ba;--ink-3:#8a929c;--accent:#6d97ff;
---accent-soft:#1d2840;--good:#4cc38a;--good-soft:#15291f;--warn:#e2a64a;--warn-soft:#2c2414;--bad:#ef7b72;
---bad-soft:#2e1a19;--cash:#6d97ff;--gpp:#b38cf0;--gpp-soft:#261d36;--wr:#6d97ff;--rb:#4cc38a;--te:#e2a64a;
---s1:#3987e5;--s2:#d95926;--s3:#199e70}}
-:root[data-theme=dark]{--bg:#111316;--surface:#191c20;--sunk:#202429;--line:#2a2f35;--line-2:#363c44;
---ink:#e8eaed;--ink-2:#aab1ba;--ink-3:#8a929c;--accent:#6d97ff;--accent-soft:#1d2840;--good:#4cc38a;
---good-soft:#15291f;--warn:#e2a64a;--warn-soft:#2c2414;--bad:#ef7b72;--bad-soft:#2e1a19;--cash:#6d97ff;
---gpp:#b38cf0;--gpp-soft:#261d36;--wr:#6d97ff;--rb:#4cc38a;--te:#e2a64a;--s1:#3987e5;--s2:#d95926;--s3:#199e70}
-:root{--card:var(--surface);--dim:var(--ink-2);--proven:var(--good);--proven-soft:var(--good-soft);
+# Every colour on the page is one of these tokens (a colour literal anywhere else in the page fails
+# `tests/test_week_style.py`). `on-fill` is text on a filled accent / good / bad / bar: white on the light
+# theme's dark fills, near-black on the dark theme's bright ones. `bar1`-`bar5` are the share bars' series,
+# each readable under `on-fill` text in its theme. `color-scheme` makes the browser's own controls (the file
+# input, search fields, scroll bars) follow the theme too: without it both engines drew them light on dark.
+LIGHT = {
+    "bg": "#f5f6f8", "surface": "#fff", "sunk": "#f0f2f5", "line": "#e3e6ea", "line-2": "#d3d8de",
+    "ink": "#16191d", "ink-2": "#4d5560", "ink-3": "#636a75", "accent": "#1f56d6", "accent-soft": "#e9effc",
+    "good": "#17784a", "good-soft": "#e7f4ec", "warn": "#9a5b00", "warn-soft": "#fdf3e2", "bad": "#b4312a",
+    "bad-soft": "#fbeceb", "cash": "#1f56d6", "gpp": "#7a3fc4", "gpp-soft": "#f1eafa",
+    "wr": "#1f56d6", "rb": "#17784a", "te": "#9a5b00", "s1": "#2a78d6", "s2": "#eb6834", "s3": "#1baf7a",
+    "on-fill": "#fff", "hover": "rgba(20,25,30,.06)", "rest": "#c8ccd3",
+    "bar1": "#2563eb", "bar2": "#15803d", "bar3": "#b45309", "bar4": "#7e22ce", "bar5": "#0e7490",
+    "elev": "0 1px 2px rgba(20,25,30,.05)", "pop": "0 6px 20px rgba(0,0,0,.18)",
+}  # fmt: skip
+DARK = {
+    "bg": "#111316", "surface": "#191c20", "sunk": "#202429", "line": "#2a2f35", "line-2": "#363c44",
+    "ink": "#e8eaed", "ink-2": "#aab1ba", "ink-3": "#8a929c", "accent": "#6d97ff", "accent-soft": "#1d2840",
+    "good": "#4cc38a", "good-soft": "#15291f", "warn": "#e2a64a", "warn-soft": "#2c2414", "bad": "#ef7b72",
+    "bad-soft": "#2e1a19", "cash": "#6d97ff", "gpp": "#b38cf0", "gpp-soft": "#261d36",
+    "wr": "#6d97ff", "rb": "#4cc38a", "te": "#e2a64a", "s1": "#3987e5", "s2": "#d95926", "s3": "#199e70",
+    "on-fill": "#111316", "hover": "rgba(255,255,255,.06)", "rest": "#3a4048",
+    "bar1": "#6d97ff", "bar2": "#4cc38a", "bar3": "#e2a64a", "bar4": "#b38cf0", "bar5": "#38bdf8",
+    "elev": "0 1px 2px rgba(0,0,0,.3)", "pop": "0 6px 20px rgba(0,0,0,.5)",
+}  # fmt: skip
+FONT = '-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif'
+
+
+def _decl(tokens: dict[str, str]) -> str:
+    return ";".join(f"--{k}:{v}" for k, v in tokens.items())
+
+
+TOKENS = (
+    f"\n:root{{{_decl(LIGHT)};--font:{FONT};color-scheme:light}}\n"
+    f"@media (prefers-color-scheme:dark){{:root:not([data-theme=light]){{{_decl(DARK)};color-scheme:dark}}}}\n"
+    f":root[data-theme=dark]{{{_decl(DARK)};color-scheme:dark}}\n"
+    """:root{--card:var(--surface);--dim:var(--ink-2);--proven:var(--good);--proven-soft:var(--good-soft);
 --shadow:var(--warn);--shadow-soft:var(--warn-soft);--untested:var(--ink-3);--ok:var(--good);--flag:var(--warn-soft)}
 """
+)
 
 # The base elements, in the type scale: every older block inherits these.
 BASE = """
@@ -154,7 +175,7 @@ color:var(--ink-2);font-size:13px;text-decoration:none;white-space:nowrap}
 .morebar a.on{background:var(--ink);border-color:var(--ink);color:var(--surface)}
 .morebar .sep{width:1px;align-self:stretch;background:var(--line-2);margin:2px 2px}
 .empty{color:var(--ink-2);margin:0;padding:0 16px 12px}
-.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--on-fill);font-weight:600}
 .crow.chead{text-transform:none;font-size:12px;color:var(--ink-3)}
 .slotrow{grid-template-columns:40px minmax(0,1fr) auto 18px}
 .sec-h .howtip{font-size:12px}
@@ -165,9 +186,9 @@ font-size:11px;font-weight:600;line-height:20px;text-align:center;color:var(--in
 .pchip.psq:not(.in){color:transparent}
 :is(p,.prose,h1,h2,h3,h4,.meta,small) .pchip.psq{width:16px;height:16px;font-size:9px;margin-right:3px;vertical-align:-3px}
 .pchip.psq:not(.in)::after{content:"+";color:var(--ink-3);font-size:14px;font-weight:400;opacity:0}
-:is(tr,li,.prow,.crow,.cand,.who):hover>.pchip.psq:not(.in),:is(tr,li,.prow,.crow,.cand,.who):hover .pchip.psq:not(.in),
+:is(tr,li,.prow,.crow,.who):hover>.pchip.psq:not(.in),:is(tr,li,.prow,.crow,.who):hover .pchip.psq:not(.in),
 .pchip.psq:focus-visible{border-color:var(--line-2)}
-:is(tr,li,.prow,.crow,.cand,.who):hover .pchip.psq:not(.in)::after,.pchip.psq:focus-visible::after{opacity:1}
+:is(tr,li,.prow,.crow,.who):hover .pchip.psq:not(.in)::after,.pchip.psq:focus-visible::after{opacity:1}
 @media (hover:none){.pchip.psq:not(.in)::after{opacity:.5}}
 .pchip.psq.in{border-style:solid;border-color:transparent}
 .pchip.psq.C{background:var(--accent-soft);color:var(--cash)}.pchip.psq.G{background:var(--gpp-soft);color:var(--gpp)}
