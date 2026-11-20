@@ -1429,9 +1429,10 @@ def edge_snapshots(
     first, cut to `INPUT_COLUMNS`."""
     import re
 
-    from dfs import nfl_calendar
+    from dfs import nfl_calendar, store
 
-    folder = folder or paths.RAW_DIR / "edge"
+    # a secondary slate's own snapshots (`slate.py`); main's exactly as before
+    folder = folder or store.raw_dir("edge")
     start = nfl_calendar.week_start_date(week, season)
     out = []
     for path in sorted(folder.glob("*.csv")):
@@ -1551,9 +1552,9 @@ def live_fade(season: int, data_dir: Path | None = None) -> FadeEffect:
 def live_games(week: int, data_dir: Path | None = None) -> list[dict]:
     """The per-game usage rows `news_context` reads (`usage_weeks.csv`, else `player_log.csv`), games before
     `week` only."""
-    from dfs import week_inputs
+    from dfs import store, week_inputs
 
-    current = (data_dir or paths.DATA_DIR) / "current"
+    current = data_dir / "current" if data_dir is not None else store.current_dir()
     try:
         games = week_inputs._read_csv(current / "usage_weeks.csv") or week_inputs._read_csv(
             current / "player_log.csv"

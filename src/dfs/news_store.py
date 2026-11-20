@@ -34,11 +34,18 @@ EDGE_SOURCE = "edge"
 
 
 def changes_path(data_dir: Path | None = None) -> Path:
-    return (data_dir or paths.DATA_DIR) / NEWS_SUBDIR / CHANGES_FILE
+    """`data/news/changes.csv`; a secondary slate logs to its own, `data/slates/<key>/news/changes.csv`."""
+    from dfs import slate
+
+    return (data_dir or slate.root()) / NEWS_SUBDIR / CHANGES_FILE
 
 
 def edge_dir(raw_dir: Path | None = None) -> Path:
-    return (raw_dir or paths.RAW_DIR) / EDGE_SOURCE
+    """The EdgeRaw snapshots the log diffs: `data/raw/edge/`, or a secondary slate's own (so the main slate's
+    diffs never compare against one of its snapshots, nor it against the main slate's)."""
+    from dfs import slate
+
+    return (raw_dir or slate.path(paths.RAW_DIR, "raw")) / EDGE_SOURCE
 
 
 def append(rows: list[dict], path: Path | None = None) -> int:

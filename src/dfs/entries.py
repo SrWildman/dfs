@@ -281,13 +281,35 @@ class Entry:
         return self.file.contest_id
 
 
+def is_slate_file(players: Sequence[TablePlayer]) -> bool:
+    """Whether an entries file is the running command's slate (`slate.py`): on `main`, `is_main_slate`
+    (unchanged); on a secondary slate, every known kickoff falls on that slate's weekday (Eastern), and a
+    table
+    with no readable kickoff is not judged. The week itself is checked by the caller (`entered.file_week`)."""
+    from dfs import slate
+
+    if slate.is_main():
+        return is_main_slate(players)
+    day = slate.DAYS[slate.current()]
+    kickoffs = [p.kickoff for p in players if p.kickoff is not None]
+    return all(pd.Timestamp(k).tz_convert(KICKOFF_TIMEZONE).weekday() == day for k in kickoffs)
+
+
+def _other_slate_reason() -> str:
+    from dfs import slate
+
+    if slate.is_main():
+        return "another slate (not Sunday afternoon only)"
+    return f"another slate (not the {slate.label()} slate)"
+
+
 def classify_entries(parsed: EntriesFile) -> tuple[list[Entry], dict[str, int]]:
     """`(the Classic main-slate entries, skipped counts by reason)`. A Showdown file, another slate and a
     Showdown or other-game contest inside a Classic file are skipped and counted, never filled."""
     if parsed.kind == "showdown":
         return [], {"Showdown file": len(parsed.entries)}
-    if not is_main_slate(parsed.players):
-        return [], {"another slate (not Sunday afternoon only)": len(parsed.entries)}
+    if not is_slate_file(parsed.players):
+        return [], {_other_slate_reason(): len(parsed.entries)}
     entries: list[Entry] = []
     skipped: dict[str, int] = defaultdict(int)
     for raw in parsed.entries:
@@ -306,8 +328,8 @@ def skipped_fees(parsed: EntriesFile) -> dict[str, float]:
     if parsed.kind == "showdown":
         out["Showdown file"] = sum(_dollars(e.entry_fee) for e in parsed.entries)
         return {k: round(v, 2) for k, v in out.items()}
-    if not is_main_slate(parsed.players):
-        out["another slate (not Sunday afternoon only)"] = sum(_dollars(e.entry_fee) for e in parsed.entries)
+    if not is_slate_file(parsed.players):
+        out[_other_slate_reason()] = sum(_dollars(e.entry_fee) for e in parsed.entries)
         return {k: round(v, 2) for k, v in out.items()}
     for raw in parsed.entries:
         fmt = entry_format(raw)

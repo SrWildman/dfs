@@ -39,6 +39,7 @@ from dfs import (
     perf,
     pool_store,
     sheet_edge_finder,
+    slate,
     store,
     suggest_state,
 )
@@ -559,11 +560,17 @@ def run_launcher() -> None:
 
 
 @app.command()
-def status() -> None:
+def status(
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
+) -> None:
     """Show whether config is set up and how fresh each data source is."""
     cfg = _load_config_or_exit()
 
     console.print(f"[green]OK[/green] config.toml loaded ({paths.CONFIG_FILE})")
+    if not slate.is_main():
+        console.print(
+            f"[bold]Slate: {slate.label()}[/bold] (its own sheet and data/slates/{slate.current()}/)"
+        )
 
     creds = paths.credentials_path(cfg.google_sheets.credentials_file)
     if creds.exists():
@@ -578,11 +585,12 @@ def status() -> None:
         console.print(f"[red]Sheets error:[/red] {e}")
         raise typer.Exit(code=1) from e
 
-    if not paths.MANIFEST_FILE.exists():
+    manifest_file = store.manifest_file()
+    if not manifest_file.exists():
         console.print("[yellow]no data yet[/yellow] -- run `dfs sync` to pull sources")
         return
 
-    manifest = _json.loads(paths.MANIFEST_FILE.read_text())
+    manifest = _json.loads(manifest_file.read_text())
     table = Table(title="Data sources")
     table.add_column("source")
     table.add_column("tab")
@@ -1800,6 +1808,7 @@ def sheets_doctor(
         help="Check a different sheet instead of config.toml's -- e.g. a freshly made "
         "weekly copy or the canonical template, before pointing anything at it.",
     ),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Read-only structural check: every tab named in config.toml exists,
     EdgeRaw's header matches derived.EDGE_COLUMNS, LINKED_EDGE_COLUMNS is
@@ -2040,8 +2049,10 @@ def sync(
         "pull must fit the budget (credits left / NFL weekends before the monthly reset).",
     ),
     fixed_lines: bool = typer.Option(False, "--fixed-lines", help=FIXED_LINES_HELP),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
-    """Fetch data sources and upload them to the connected Google Sheet."""
+    """Fetch data sources and upload them to the connected Google Sheet. With `--slate thu` (a secondary
+    slate): that slate's DraftKings draft group and its own sheet and files; player props are not pulled."""
     cfg = _load_config_or_exit()
     if sheet_id:
         cfg = cfg.model_copy(
@@ -2069,6 +2080,12 @@ def sync(
     ctx = SyncContext.current(week=week, season=season)
     ctx.live = live
     source_names, props_note = _props_plan(source_names, ctx, live=live, forced=props, only=bool(only))
+    if not slate.is_main() and "odds_props" in source_names:
+        # The Odds API budget and its once-a-week pull are the main slate's: a secondary slate never spends.
+        source_names = [n for n in source_names if n != "odds_props"]
+        props_note = (
+            f"props: not pulled on the {slate.label()} slate (The Odds API budget is the main slate's)"
+        )
     if props_note:
         console.print(props_note)
 
@@ -2091,7 +2108,8 @@ def sync(
         except FileNotFoundError:
             old_edge = None
 
-    console.print(f"Syncing week {ctx.week}, season {ctx.season} ({len(source_names)} source(s))...")
+    on = "" if slate.is_main() else f"the {slate.label()} slate of "
+    console.print(f"Syncing {on}week {ctx.week}, season {ctx.season} ({len(source_names)} source(s))...")
 
     results = run_sync(cfg, source_names, ctx, upload=not no_upload)
 
@@ -2157,7 +2175,7 @@ def sync(
 
     if "edge" in source_names and not no_upload:
         _refresh_native_lookups(cfg)
-    if not no_upload:
+    if not no_upload and slate.is_main():  # the bankroll is the main sheet's; a secondary slate's has none
         _save_bankroll_health(cfg, live_client or SheetsClient(cfg.google_sheets), ctx.season, ctx.week)
 
     if any_failed:
@@ -2295,12 +2313,12 @@ def _write_lineup_sim(
     started = time.perf_counter()
     try:
         from dfs import injury_beneficiaries as ib
-        from dfs.edge_finder import OUTPUT_DIR as EDGE_FINDER_DIR
         from dfs.edge_finder import PLAYERS_FILE
+        from dfs.edge_finder import output_dir as edge_finder_dir
 
         edge = store.load_current("edge")
         try:
-            players = pd.read_csv(EDGE_FINDER_DIR / PLAYERS_FILE, usecols=["Id", "GsisId"])
+            players = pd.read_csv(edge_finder_dir() / PLAYERS_FILE, usecols=["Id", "GsisId"])
             gsis_by_id = dict(zip(players["Id"], players["GsisId"], strict=True))
         except (OSError, ValueError):
             gsis_by_id = {}
@@ -2422,11 +2440,11 @@ def _refresh_cockpit(
 def _depth_and_gsis() -> tuple:
     """The depth chart and GSIS ids the simulator's roles are built from (None / {} when not synced)."""
     from dfs import injury_beneficiaries as ib
-    from dfs.edge_finder import OUTPUT_DIR as EDGE_FINDER_DIR
     from dfs.edge_finder import PLAYERS_FILE
+    from dfs.edge_finder import output_dir as edge_finder_dir
 
     try:
-        players = pd.read_csv(EDGE_FINDER_DIR / PLAYERS_FILE, usecols=["Id", "GsisId"])
+        players = pd.read_csv(edge_finder_dir() / PLAYERS_FILE, usecols=["Id", "GsisId"])
         gsis_by_id = {
             i: g for i, g in zip(players["Id"], players["GsisId"], strict=True) if isinstance(g, str)
         }
@@ -2780,6 +2798,7 @@ def odds_movement(
 @app.command()
 def export(
     output: Path = typer.Option(..., "--output", "-o", help="Path to write the DK bulk-upload CSV."),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Validate paired lineups in the lineups tab and export DK's upload CSV.
 
@@ -2919,6 +2938,7 @@ def entries_fill(
     sheet_id: str = typer.Option(
         None, "--sheet-id", help="Use a different sheet instead of config.toml's (e.g. the template)."
     ),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Fill DraftKings' entries file from the lineups you chose on the DK Upload tab.
 
@@ -3027,6 +3047,7 @@ def entries_record(
         help="This week's H2Hs: ones you posted, joined, or both (the ledger's H2H line). Left out at a "
         "terminal with H2H entries, it asks once; never when piped.",
     ),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Record what you entered this week, at lock: every lineup, its contest(s), and which Suggested build it
     came from (8 or more of its 9 players in one saved build of the week, any round) or "own".
@@ -3197,6 +3218,7 @@ def entries_print(
         None, "--output", "-o", help="Where to write the file (default: dk_lineups_<timestamp>.csv here)."
     ),
     sheet_id: str = typer.Option(None, "--sheet-id", help="Read a different sheet instead of config.toml's."),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Print every lineup on the Lineups tab in DraftKings' `Name (ID)` slot format, and write it to a file.
 
@@ -3242,6 +3264,7 @@ def lineups_clear(
         help="Clear a different sheet instead of config.toml's -- e.g. a fresh weekly "
         "copy or the canonical template, before pointing config.toml at it.",
     ),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Clear last week's typed-in lineup data (Lineups/Player Pool name
     columns, DK Upload) so the sheet's ready for a new week.
@@ -3369,14 +3392,14 @@ def _late_swap_sim_setup(
     Cash Line in Results this season, read only) and GPP target. None, with a note, when anything is missing:
     the swaps are then shown and ranked by projection alone."""
     from dfs import injury_beneficiaries as ib
-    from dfs.edge_finder import OUTPUT_DIR as EDGE_FINDER_DIR
     from dfs.edge_finder import PLAYERS_FILE
+    from dfs.edge_finder import output_dir as edge_finder_dir
     from dfs.late_swap_sim import SimSettings
     from dfs.sim_inputs import build_specs, cash_line_from_results, resolve_lines
 
     try:
         try:
-            players = pd.read_csv(EDGE_FINDER_DIR / PLAYERS_FILE, usecols=["Id", "GsisId"])
+            players = pd.read_csv(edge_finder_dir() / PLAYERS_FILE, usecols=["Id", "GsisId"])
             gsis_by_id = {
                 i: g for i, g in zip(players["Id"], players["GsisId"], strict=True) if isinstance(g, str)
             }
@@ -3420,7 +3443,7 @@ def _late_swap_news(edge: pd.DataFrame, *, now: datetime, refresh: bool) -> tupl
     (`late_swap_news`): escalations only, each printed with its time. A failed fetch is a warning."""
     from dfs import late_swap_news as news
 
-    path = store.CURRENT_DIR / "edge.csv"
+    path = store.current_dir() / "edge.csv"
     if path.exists():
         age = news.age_minutes(datetime.fromtimestamp(path.stat().st_mtime, UTC), now)
         stale = age > LATE_SWAP_STALE_MINUTES
@@ -3906,6 +3929,7 @@ def lineups_late_swap(
         "Questionable only escalate a status, never clear one), and list what changed. Use it in the late "
         "window, after news breaks.",
     ),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Check every built lineup in the Lineups tab against real kickoff
     times, then suggest what to swap: the best full re-fill of the open
@@ -4012,6 +4036,7 @@ def lineups_suggest(
         "around the rules box (what the Week page's open-spot pick runs) and leaves every GPP build as is; "
         "`gpp` leaves the cash builds as they are.",
     ),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Build complete lineups from your Player Pool and write them to the
     Suggested tab.
@@ -4456,6 +4481,7 @@ def week_page_command(
     open_browser: bool = typer.Option(
         True, "--open/--no-open", help="Open the page in your browser (default: open it)."
     ),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Write one self-contained HTML page for the week and open it: today's steps (with the phrase to say and
     the command), then the week's plays by position (best value, cash core, GPP upside, fades), the slate
@@ -4537,6 +4563,7 @@ def week_serve_command(
     stop: bool = typer.Option(
         False, "--stop", help="Stop the running Week server (SIGTERM to the pid in data/week/serve.pid)."
     ),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Serve the Week page on this Mac only (127.0.0.1, a random token in the link it opens), with Claude Code
     beside it (folded until you press Ask Claude): ask in the chat without leaving the page, press a button to
@@ -4574,6 +4601,7 @@ def week_new(
         None, "--week", help="Override the auto-detected NFL week used to title the new sheet."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Move config.toml to a new week's sheet copy: check the new sheet's
     structure (`dfs doctor`), carry the bankroll and Results log
@@ -4638,7 +4666,16 @@ def week_new(
     not bring `Red`/`Blue`/`Black` back. If the current sheet has no
     Results tab at all (e.g. moving off a sheet that predates this), this
     step is skipped with a note instead of failing.
+
+    With `--slate thu` (a secondary slate, `slate.py`) it does far less, and never touches the main slate:
+    it checks the copy (`dfs doctor`), titles it "Week <n> Thursday" unless it already has a "Week <n> <name>"
+    title of its own, writes `[slates.thu] sheet_id` to config.toml (the main `sheet_id` is never changed),
+    resets the copy's Suggested tab and synced tabs, and clears that slate's local copies. No bankroll or
+    Results carry (the money is the main sheet's) and no sync: run `dfs sync --slate thu` next.
     """
+    if not slate.is_main():
+        _week_new_slate(sheet_url, week, yes)
+        return
     cfg = _load_config_or_exit()
 
     try:
@@ -4906,6 +4943,132 @@ def week_new(
         raise typer.Exit(code=1)
 
 
+def _week_new_slate(sheet_url: str, week: int | None, yes: bool) -> None:
+    """`dfs week new --slate <key>` (see `week_new`). Refuses the main slate's sheet, last week's, another
+    slate's, and anything titled like the template, before any write."""
+    from dfs.config import ConfigError, load_base_config
+
+    key = slate.current()
+    try:
+        base = load_base_config()
+    except ConfigError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+    try:
+        new_sheet_id = parse_sheet_id_from_url(sheet_url)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+    gs = base.google_sheets
+    others = {k: v.sheet_id for k, v in base.slates.items() if k != key}
+    if new_sheet_id in {gs.sheet_id, gs.previous_sheet_id}:
+        console.print(
+            "[red]That is the main slate's sheet (config.toml's sheet_id or previous_sheet_id).[/red] A "
+            "secondary slate needs its own copy of the template. Nothing changed."
+        )
+        raise typer.Exit(code=1)
+    if new_sheet_id in others.values():
+        console.print(f"[red]That sheet is already another slate's ({others}).[/red] Nothing changed.")
+        raise typer.Exit(code=1)
+    current = base.slates.get(key)
+    if current is not None and current.sheet_id == new_sheet_id:
+        console.print(
+            f"[yellow]The {slate.label(key)} slate already points at that sheet: nothing to do.[/yellow]"
+        )
+        raise typer.Exit(code=1)
+
+    new_gs = gs.model_copy(update={"sheet_id": new_sheet_id, "previous_sheet_id": None})
+    new_client = SheetsClient(new_gs)
+    try:
+        title, url = new_client.describe()
+    except SheetsError as e:
+        console.print(f"[red]Could not open the new sheet ({new_sheet_id}):[/red] {e}")
+        console.print("Make sure it's shared with the service account and try again.")
+        raise typer.Exit(code=1) from e
+    console.print(f"The {slate.label(key)} slate's new sheet: [bold]{title}[/bold]\n{url}\n")
+    if "template" in title.casefold():
+        console.print("[red]That sheet is titled like the template: copy it first, and pass the copy.[/red]")
+        raise typer.Exit(code=1)
+
+    resolved_week = week if week is not None else nfl_calendar.current_week()
+    found = slate.title_week(title)
+    if found is not None and found != resolved_week:
+        console.print(
+            f"[red]{title!r} says Week {found}, but this is Week {resolved_week}.[/red] Pass --week, or "
+            "rename "
+            "the sheet. Nothing changed."
+        )
+        raise typer.Exit(code=1)
+    if title.strip() == f"Week {resolved_week}" or title.strip().startswith("Week ") and found is None:
+        console.print(
+            f'[red]{title!r} reads as a main-slate sheet ("Week <n>").[/red] Rename the copy "Week '
+            f'{resolved_week} <name>" (e.g. "Week {resolved_week} Thanksgiving"). Nothing changed.'
+        )
+        raise typer.Exit(code=1)
+    target_title = title if found is not None else slate.default_title(key, resolved_week)
+
+    console.print("Checking the new sheet's structure before touching anything...")
+    try:
+        issues = run_doctor(new_client, base, title=title, check_title=False)
+    except SheetsError as e:
+        console.print(f"[red]Sheets error checking the new sheet:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    issues = [i for i in issues if i.check != "suggested-layout"]
+    if issues:
+        for issue in issues:
+            console.print(_fail_line(issue.check, issue.detail))
+        console.print("\n[red]The new sheet failed structural checks -- stopping before any write.[/red]")
+        raise typer.Exit(code=1)
+    console.print("[green]OK[/green] new sheet passed structural checks\n")
+
+    if not yes and not typer.confirm(
+        f'Point the {slate.label(key)} slate at "{target_title}"? This writes [slates.{key}] in config.toml '
+        "(the main slate's sheet_id is not touched), resets this copy's Suggested and synced tabs, and "
+        "clears "
+        f"the slate's local copies in data/slates/{key}/current/."
+    ):
+        console.print("Cancelled -- nothing changed.")
+        raise typer.Exit(code=0)
+
+    if target_title != title:
+        try:
+            new_client.set_title(target_title)
+        except SheetsError as e:
+            console.print(f"[red]Could not rename the new sheet:[/red] {e}")
+            raise typer.Exit(code=1) from e
+        console.print(f'[green]OK[/green] titled the new sheet "{target_title}" (was "{title}")')
+
+    from dfs.week import rewrite_slate_sheet_id
+
+    try:
+        updated = rewrite_slate_sheet_id(paths.CONFIG_FILE.read_text(), key=key, new_sheet_id=new_sheet_id)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+    paths.CONFIG_FILE.write_text(updated)
+    load_config.cache_clear()
+    console.print(
+        f"[green]OK[/green] config.toml: [slates.{key}] sheet_id = {new_sheet_id} (the main slate's "
+        "sheet_id is "
+        f"still {gs.sheet_id})"
+    )
+
+    _reset_suggested_on_new_sheet(new_client)
+    try:
+        cleared = clear_synced_tabs(new_client, base.google_sheets.tab_mappings, list(SOURCES))
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    for line in cleared:
+        console.print(f"[green]OK[/green] {line}")
+    removed = store.clear_current()
+    if removed:
+        console.print(
+            f"[green]OK[/green] cleared {len(removed)} of the slate's local synced copies: {removed}"
+        )
+    console.print(f"\nNext: [bold]dfs sync --slate {key}[/bold] (its draft group, its sheet).")
+
+
 def _rebuild_cockpit_on_new_sheet(cfg: Config, client: SheetsClient) -> None:
     """Rewrite the Cockpit on the new week's sheet from the edge frame the sync just saved, so a copied
     template's stale render (last week's open slots, entries and exposure) is replaced at once. Only when the
@@ -5030,10 +5193,28 @@ def week_close(
     _contest_plan_after_close(cfg, closed)
     _entered_record_warning(closed)
     _cash_postmortem_after_close(closed)
+    _secondary_slates_after_close(cfg, csv, closed)
     _du_line_after_close(closed)  # before the review: the band's line, measured on the new double-up too
     _plan_k_after_close(cfg, closed)
     if research:
         _research_after_close(cfg, week, monthly=monthly)
+
+
+def _secondary_slates_after_close(cfg: Config, csv: Path, closed: int | None) -> None:
+    """One line per secondary slate the closed week had (Thanksgiving): its money booked with the main
+    slate's,
+    its standings kept apart, its learning skipped (`slate_close`). Silent for a week with none; never
+    fails."""
+    from dfs import slate_close
+    from dfs.nfl_calendar import current_season
+
+    try:
+        lines = slate_close.close_lines(cfg, csv, current_season(), closed)
+    except Exception as e:  # noqa: BLE001 - the close already succeeded
+        console.print(f"[yellow]Secondary slates not summarised ({escape(str(e))}).[/yellow]")
+        return
+    for line in lines:
+        console.print("\n" + escape(line), highlight=False, soft_wrap=True)
 
 
 def _du_line_after_close(closed: int | None) -> None:
@@ -5167,7 +5348,12 @@ def _keep_dk_files_before_scoring(cfg: Config, csv: Path) -> None:
     console.print("\n[bold]Keeping the week's DK files[/bold] (Model Check scores against them)...")
     try:
         _keep_history_export(csv)
-        got = capture.capture_standings(Path(cfg.contests.downloads_dir).expanduser(), DK_STANDINGS_DIR)
+        from dfs import slate_close
+
+        divert = slate_close.standings_divert(cfg, csv)
+        got = capture.capture_standings(
+            Path(cfg.contests.downloads_dir).expanduser(), DK_STANDINGS_DIR, divert
+        )
         for line in capture.describe(got):
             console.print(escape(line))
     except Exception as e:  # noqa: BLE001 - the bankroll side already succeeded; the contests step retries
@@ -5777,7 +5963,14 @@ def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None, 
     # week's worth. A season-long export backfills every past week it
     # has real data for in one pass; Cash Line and the team-colour
     # columns are never touched (see results_autofill.write_results_updates).
-    week_results = compute_week_results(entries, nfl_calendar.current_season())
+    # Results is the main slate's record: a secondary slate's entries this week (Thanksgiving's double-ups and
+    # H2Hs) are booked in the Bankroll ledger above, never in Cash Pts / H2H here (`slate_close`).
+    from dfs import slate_close
+
+    results_entries = slate_close.main_slate_entries(
+        entries, cfg, nfl_calendar.current_season(), resolved_week
+    )
+    week_results = compute_week_results(results_entries, nfl_calendar.current_season())
     try:
         written_weeks = write_results_updates(client, cfg.results, week_results)
     except SheetsError as e:
@@ -5889,7 +6082,10 @@ def _print_candidates(query: str, candidates: list) -> None:
 
 
 @pool_app.command("add")
-def pool_add(names: list[str] = typer.Argument(..., help="Player name(s) or substrings to add.")) -> None:
+def pool_add(
+    names: list[str] = typer.Argument(..., help="Player name(s) or substrings to add."),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
+) -> None:
     """Set EdgeRaw's Pool column to "Both" for each name given, by exact
     match if one exists, else by substring -- multiple matches are
     printed (name, position, salary) and skipped rather than guessed at.
@@ -5916,6 +6112,7 @@ def pool_add(names: list[str] = typer.Argument(..., help="Player name(s) or subs
 @pool_app.command("remove")
 def pool_remove(
     names: list[str] = typer.Argument(..., help="Player name(s) or substrings to remove."),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Clear EdgeRaw's Pool column for each name given -- same matching
     rules as `dfs pool add`."""
@@ -5938,7 +6135,9 @@ def pool_remove(
 
 
 @pool_app.command("list")
-def pool_list() -> None:
+def pool_list(
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
+) -> None:
     """Every currently-pooled EdgeRaw player, grouped by position."""
     client, edge_tab = _pool_client_and_edge_tab()
     try:
@@ -5966,6 +6165,7 @@ def pool_list() -> None:
 @pool_app.command("clear")
 def pool_clear(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    slate_key: str = typer.Option(slate.MAIN, "--slate", help=slate.SLATE_HELP),
 ) -> None:
     """Clear every currently-pooled EdgeRaw player. Confirms first
     unless `--yes` is given -- this touches every pooled row at once."""

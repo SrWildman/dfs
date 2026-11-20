@@ -32,7 +32,11 @@ INPUTS_SUBDIR = Path("week") / "inputs"
 
 
 def data_root() -> Path:
-    return paths.DATA_DIR
+    """`data/`; on a secondary slate its own folder, `data/slates/<key>/` (`slate.py`), laid out like `data/`:
+    the page reads that slate's synced copies, pools, builds, entries, late swap and run log."""
+    from dfs import slate
+
+    return slate.root() if not slate.is_main() else paths.DATA_DIR
 
 
 CONTEST_PLAN_SHAPE = """`dfs contests plan` leaves (via `week_inputs.save_input("contest_plan", {...})`):

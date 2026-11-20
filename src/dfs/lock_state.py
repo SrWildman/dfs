@@ -151,9 +151,14 @@ MATCH_MIN = (
 
 
 def saturday_night(first_kickoff: datetime | None, fallback: datetime) -> datetime:
-    """9:00 pm ET on the Saturday before the slate's Sunday (`fallback`'s week with no kickoff)."""
+    """9:00 pm ET on the Saturday before the slate's Sunday (`fallback`'s week with no kickoff). On a
+    secondary
+    slate (`slate.py`: Thanksgiving), 9:00 pm ET the night before its own day."""
+    from dfs import slate
+
     day = (first_kickoff or fallback).astimezone(EASTERN).date()
-    while day.weekday() != 6:  # the slate's Sunday
+    target = 6 if slate.is_main() else slate.DAYS[slate.current()]
+    while day.weekday() != target:  # the slate's Sunday (its own day on a secondary slate)
         day += timedelta(days=1)
     sat = day - timedelta(days=1)
     return datetime(sat.year, sat.month, sat.day, SATURDAY_BASELINE_HOUR, tzinfo=EASTERN)

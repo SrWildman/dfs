@@ -45,18 +45,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from dfs import calibration, signals_data, usage_r6
+from dfs import calibration, signals_data, store, usage_r6
 from dfs.derived import _rosterable_pool_mask
 from dfs.edge_finder import (
     ABSENCES_FILE,
     BENEFICIARIES_FILE,
     MATCHUPS_FILE,
-    OUTPUT_DIR,
     PLAYERS_FILE,
     STATUS_FILE,
+    output_dir,
 )
 from dfs.kickoff import format_et, parse_kickoff
-from dfs.paths import CURRENT_DIR
 from dfs.research_constants import ResearchConstantsError, signal_thresholds
 from dfs.sheet_clipping import FIT_PADDING_PX, FIT_PX_PER_CHAR, estimate_px
 from dfs.sheet_color_scales import BLOCK_BAD, BLOCK_DIFF, BLOCK_GOOD, BLOCK_OWN, BLOCK_SIGN
@@ -378,7 +377,7 @@ def _read(path: Path) -> pd.DataFrame:
 def load_r6(edge: pd.DataFrame, players: pd.DataFrame) -> R6View | None:
     """The R6 view for the slate, from the features the sync saved (`usage_r6.SAVED_FILE`) and the research
     files (`usage_signals.json`, `trend_bands.json`). None when either is missing: the tab then says so."""
-    path = OUTPUT_DIR / usage_r6.SAVED_FILE
+    path = output_dir() / usage_r6.SAVED_FILE
     if not path.exists() or "GsisId" not in players.columns:
         return None
     try:
@@ -423,12 +422,12 @@ def typical_best_hit3x(season: int, before_week: int) -> dict[str, tuple[float, 
 def load_inputs(*, scored: pd.DataFrame | None = None, season: int | None = None) -> Inputs | None:
     """The saved sync outputs, or None when no sync has produced them yet. `scored` (every scored table) lets
     the disagreement reasons quote the calibration's own biases."""
-    edge = _read(CURRENT_DIR / "edge.csv")
-    players = _read(OUTPUT_DIR / PLAYERS_FILE)
+    edge = _read(store.current_dir() / "edge.csv")
+    players = _read(output_dir() / PLAYERS_FILE)
     if edge.empty or players.empty:
         return None
     status = {}
-    status_path = OUTPUT_DIR / STATUS_FILE
+    status_path = output_dir() / STATUS_FILE
     if status_path.exists():
         status = json.loads(status_path.read_text())
     fitted = None
@@ -446,9 +445,9 @@ def load_inputs(*, scored: pd.DataFrame | None = None, season: int | None = None
         price_gap_record=_price_gap_record(season or status.get("season")),
         edge=edge,
         players=players,
-        beneficiaries=_read(OUTPUT_DIR / BENEFICIARIES_FILE),
-        matchups=_read(OUTPUT_DIR / MATCHUPS_FILE),
-        absences=_read(OUTPUT_DIR / ABSENCES_FILE),
+        beneficiaries=_read(output_dir() / BENEFICIARIES_FILE),
+        matchups=_read(output_dir() / MATCHUPS_FILE),
+        absences=_read(output_dir() / ABSENCES_FILE),
         status=status,
         calibration=fitted,
         r6=load_r6(edge, players),

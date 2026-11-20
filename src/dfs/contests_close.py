@@ -133,7 +133,10 @@ def run_contests(
 
     say("Standings files:")
     try:
-        got = capture.capture_standings(downloads, DK_STANDINGS_DIR)
+        from dfs import slate_close
+
+        divert = slate_close.standings_divert(cfg, history_csv)
+        got = capture.capture_standings(downloads, DK_STANDINGS_DIR, divert)
         for line in capture.describe(got):
             say(line)
     except OSError as e:

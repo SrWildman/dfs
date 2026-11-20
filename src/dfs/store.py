@@ -20,10 +20,28 @@ from pathlib import Path
 
 import pandas as pd
 
+from dfs import slate
 from dfs.kickoff import KICKOFF_TIMEZONE, kickoff_utc
 from dfs.paths import CURRENT_DIR, MANIFEST_FILE, RAW_DIR, ensure_data_dirs
 
 _SNAPSHOT_STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+
+
+def current_dir() -> Path:
+    """`data/current/`; on a secondary slate, `data/slates/<key>/current/` (`slate.py`)."""
+    return slate.path(CURRENT_DIR, "current")
+
+
+def raw_dir(source_name: str) -> Path:
+    """`data/raw/<source>/`, where every saved snapshot of a source is kept; on a secondary slate,
+    `data/slates/<key>/raw/<source>/`, so no main-slate reader of `data/raw/` ever sees one of its
+    snapshots."""
+    return slate.path(RAW_DIR, "raw") / source_name
+
+
+def manifest_file() -> Path:
+    """`data/manifest.json` (what `dfs status` and the page's stale notice read); a secondary slate's own."""
+    return slate.path(MANIFEST_FILE, "manifest.json")
 
 
 def _now_stamp() -> str:
@@ -32,11 +50,13 @@ def _now_stamp() -> str:
 
 def save(source_name: str, df: pd.DataFrame) -> None:
     ensure_data_dirs()
-    raw_dir = RAW_DIR / source_name
-    raw_dir.mkdir(parents=True, exist_ok=True)
+    folder = raw_dir(source_name)
+    folder.mkdir(parents=True, exist_ok=True)
+    current = current_dir()
+    current.mkdir(parents=True, exist_ok=True)
 
-    df.to_csv(raw_dir / f"{_now_stamp()}.csv", index=False)
-    df.to_csv(CURRENT_DIR / f"{source_name}.csv", index=False)
+    df.to_csv(folder / f"{_now_stamp()}.csv", index=False)
+    df.to_csv(current / f"{source_name}.csv", index=False)
 
 
 def clear_current() -> list[str]:
@@ -55,15 +75,16 @@ def clear_current() -> list[str]:
     a fresh `dfs sync` right after this repopulates it from scratch."""
     ensure_data_dirs()
     removed = []
-    if CURRENT_DIR.exists():
-        for path in sorted(CURRENT_DIR.glob("*.csv")):
+    current = current_dir()
+    if current.exists():
+        for path in sorted(current.glob("*.csv")):
             path.unlink()
             removed.append(path.stem)
     return removed
 
 
 def load_current(source_name: str) -> pd.DataFrame:
-    path = CURRENT_DIR / f"{source_name}.csv"
+    path = current_dir() / f"{source_name}.csv"
     if not path.exists():
         raise FileNotFoundError(f"No synced data for {source_name!r} yet -- run `dfs sync`.")
     return pd.read_csv(path)
@@ -76,8 +97,8 @@ def load_previous(source_name: str) -> pd.DataFrame:
     them chronologically. Used for line-movement diffing: this needs no new
     storage, since `save()` has always kept every snapshot under
     `data/raw/<source>/`."""
-    raw_dir = RAW_DIR / source_name
-    snapshots = sorted(raw_dir.glob("*.csv")) if raw_dir.exists() else []
+    folder = raw_dir(source_name)
+    snapshots = sorted(folder.glob("*.csv")) if folder.exists() else []
     if len(snapshots) < 2:
         raise FileNotFoundError(
             f"Only {len(snapshots)} synced snapshot(s) of {source_name!r} on disk -- "
@@ -103,9 +124,9 @@ class Opening:
 
 def snapshot_paths(source_name: str) -> list[tuple[datetime, Path]]:
     """Every saved snapshot of a source, oldest first, with the UTC instant in its filename."""
-    raw_dir = RAW_DIR / source_name
+    folder = raw_dir(source_name)
     out = []
-    for path in sorted(raw_dir.glob("*.csv")) if raw_dir.exists() else []:
+    for path in sorted(folder.glob("*.csv")) if folder.exists() else []:
         try:
             out.append((datetime.strptime(path.stem, _SNAPSHOT_STAMP_FORMAT).replace(tzinfo=UTC), path))
         except ValueError:
@@ -166,14 +187,17 @@ def load_since(source_name: str, since: date) -> pd.DataFrame:
 
 
 def read_manifest() -> dict:
-    if not MANIFEST_FILE.exists():
+    path = manifest_file()
+    if not path.exists():
         return {}
-    return json.loads(MANIFEST_FILE.read_text())
+    return json.loads(path.read_text())
 
 
 def _write_manifest(manifest: dict) -> None:
     ensure_data_dirs()
-    MANIFEST_FILE.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    path = manifest_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
 
 
 def record_success(source_name: str, rows: int) -> None:

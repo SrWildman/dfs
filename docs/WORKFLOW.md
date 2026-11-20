@@ -513,6 +513,40 @@ number are in [CALCULATIONS.md](CALCULATIONS.md).
 **Done looks like:** the status line shows the weeks scored and a high "joined" percentage; players it could not
 find are listed in `data/results/unmatched_<season>_wNN.csv` (mostly backups who never recorded a stat).
 
+## A second slate in one week: Thanksgiving, Saturdays, Christmas
+
+Some weeks have a second Classic slate you may play beside the Sunday main slate: Thanksgiving (a Thursday),
+Saturdays late in the season, Christmas (a Friday). Each is a **slate key** named by its day (`thu`, `sat`,
+`fri`); the main slate is `main`, the default, and nothing about it changes.
+
+**Set it up once a week it happens.** Copy the template in Drive and name the copy "Week <n> <name>" (e.g.
+"Week 12 Thanksgiving"; a plain "Week <n>" is the main slate's and is refused), share it with the service
+account as an Editor, then `dfs week new --slate thu "<url>"`. That checks the copy (`dfs doctor`), writes
+`[slates.thu] sheet_id` to config.toml (the main slate's `sheet_id` is never touched), resets the copy's
+Suggested and synced tabs and clears the slate's local copies. No bankroll or Results carry: the money is the
+main sheet's.
+
+**Run it like a main week, with `--slate thu`:** `dfs sync --slate thu` (the largest Classic draft group whose
+games all kick off on that week's Thursday; props are never pulled for it), `dfs lineups suggest --slate thu`,
+`dfs entries record --slate thu`, `dfs lineups late-swap --slate thu`, `dfs export --slate thu`, `dfs week serve
+--slate thu` (its own page, beside the main one: "Week 12 · Thursday slate", its day views timed off its own
+first kickoff; the page's chat and buttons stay on that slate). `dfs status --slate thu` and `dfs doctor --slate
+thu` check it. Everything it writes goes to its own sheet and `data/slates/thu/`; the main slate's files never
+move and are never read by it.
+
+**What is the main slate's only.** Every other command refuses `--slate` (and `DFS_SLATE`) before it runs: the
+close, `results update`, `bankroll sync`, the contests engine, research, the model and the simulator commands.
+
+**The close.** One `dfs week close` for the week, as always. It books every NFL entry of the week, both slates',
+once each in the Bankroll ledger and the contest log (the ledger and the contest plan count both). The learning
+is the main slate's: Results' Cash Pts and H2H leave the secondary slate's contests out, and its standings files
+are kept apart in `data/slates/thu/dk_standings/`, so the ownership log, the double-up line, the copies
+estimate, the cash post-mortem, edge at lock, the scorecards and Model Check never see them. The close prints
+one line per secondary slate saying so.
+
+**If anything fails, play it by hand:** build on the slate's sheet (or in DraftKings) yourself; the main slate
+is untouched either way.
+
 ## The Week page as an app: `dfs week serve`
 
 `dfs week serve` opens the Week page on this Mac only, with Claude Code beside it, folded until you press **Ask Claude**. Ask in the chat instead of

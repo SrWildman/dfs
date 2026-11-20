@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
@@ -58,6 +59,15 @@ from dfs.sources.base import SyncContext
 log = get_logger("edge_finder")
 
 OUTPUT_DIR = CURRENT_DIR / "edge_finder"
+
+
+def output_dir() -> Path:
+    """`data/current/edge_finder/`; on a secondary slate its own (`slate.py`)."""
+    from dfs import slate
+
+    return slate.path(OUTPUT_DIR, "current", "edge_finder")
+
+
 PLAYERS_FILE = "players.csv"
 BENEFICIARIES_FILE = "beneficiaries.csv"
 ABSENCES_FILE = "absences.csv"
@@ -252,7 +262,7 @@ def _r6_features(ctx: SyncContext, notes: list[str]) -> pd.DataFrame | None:
     (the features of a
     game do not change with that week's results). None when they cannot be had; the rest of the sync
     stands."""
-    path = OUTPUT_DIR / R6_FEATURES_FILE
+    path = output_dir() / R6_FEATURES_FILE
     try:
         if ctx.live:
             if not path.exists():
@@ -288,8 +298,8 @@ def _save_r6_features(features: pd.DataFrame | None, ctx: SyncContext) -> None:
     """Keep this slate's features for the Edge Finder tab (its Usage trends and Context signals read them)."""
     if features is None or features.empty:
         return
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    features.to_csv(OUTPUT_DIR / R6_FEATURES_FILE, index=False)
+    output_dir().mkdir(parents=True, exist_ok=True)
+    features.to_csv(output_dir() / R6_FEATURES_FILE, index=False)
 
 
 def _write_outputs(
@@ -306,16 +316,16 @@ def _write_outputs(
 ) -> None:
     """The signals archive (`data/signals/`) and the tab's source tables (`data/current/edge_finder/`)."""
     signals_data.write_archive(output.players, ctx.season, ctx.week, now)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir().mkdir(parents=True, exist_ok=True)
     source_cols = [c for c in SOURCE_PROJECTION_COLUMNS if c in df.columns]
     players = output.players.drop(columns=source_cols, errors="ignore")
     if source_cols:  # the tab splits CalPts - ProjPts by source, so it needs each source's own projection
         players = players.merge(df[["Id", *source_cols]].drop_duplicates("Id"), on="Id", how="left")
-    players.to_csv(OUTPUT_DIR / PLAYERS_FILE, index=False)
-    output.beneficiaries.to_csv(OUTPUT_DIR / BENEFICIARIES_FILE, index=False)
-    output.absences.to_csv(OUTPUT_DIR / ABSENCES_FILE, index=False)
-    output.matchups.to_csv(OUTPUT_DIR / MATCHUPS_FILE, index=False)
-    output.outs.to_csv(OUTPUT_DIR / OUTS_FILE, index=False)
+    players.to_csv(output_dir() / PLAYERS_FILE, index=False)
+    output.beneficiaries.to_csv(output_dir() / BENEFICIARIES_FILE, index=False)
+    output.absences.to_csv(output_dir() / ABSENCES_FILE, index=False)
+    output.matchups.to_csv(output_dir() / MATCHUPS_FILE, index=False)
+    output.outs.to_csv(output_dir() / OUTS_FILE, index=False)
     weeks = data.ffo_weeks
     through = None
     if weeks is not None and not weeks.empty:
@@ -344,7 +354,7 @@ def _write_outputs(
         "live": bool(ctx.live),
         "notes": notes,
     }
-    (OUTPUT_DIR / STATUS_FILE).write_text(json.dumps(status, indent=2))
+    (output_dir() / STATUS_FILE).write_text(json.dumps(status, indent=2))
 
 
 def injury_report_info(data: signals.SeasonData, ctx: SyncContext) -> dict:
@@ -352,7 +362,7 @@ def injury_report_info(data: signals.SeasonData, ctx: SyncContext) -> dict:
     final status (blank until teams publish Friday's report; before that the rows are practice reports only),
     and when this copy was fetched (the saved file's time). Shown on the Edge Finder tab so a thin report
     reads as a timing fact, not a bug."""
-    from dfs.paths import CURRENT_DIR
+    from dfs import store
 
     rows = with_status = 0
     if data.injuries is not None and not data.injuries.empty:
@@ -362,7 +372,7 @@ def injury_report_info(data: signals.SeasonData, ctx: SyncContext) -> dict:
             & (pd.to_numeric(inj["week"], errors="coerce") == ctx.week)
         ]
         rows, with_status = len(mine), int(mine["report_status"].notna().sum())
-    path = CURRENT_DIR / "nflverse_injuries.csv"
+    path = store.current_dir() / "nflverse_injuries.csv"
     fetched = (
         datetime.fromtimestamp(path.stat().st_mtime, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         if path.exists()
@@ -380,9 +390,9 @@ def injury_report_info(data: signals.SeasonData, ctx: SyncContext) -> dict:
 def read_gsis_crosswalk() -> pd.DataFrame | None:
     """The usage join's DraftKings-id -> gsis map from this sync (`data/current/gsis_crosswalk.csv`), the
     second identity source after the depth chart. None when it does not exist."""
-    from dfs.paths import CURRENT_DIR
+    from dfs import store
 
-    path = CURRENT_DIR / "gsis_crosswalk.csv"
+    path = store.current_dir() / "gsis_crosswalk.csv"
     if not path.exists():
         return None
     try:

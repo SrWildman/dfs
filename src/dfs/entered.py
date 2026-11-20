@@ -36,7 +36,10 @@ H2H_WORDS = {"posted": "ones you posted", "joined": "ones you joined", "both": "
 
 
 def record_path(season: int, week: int) -> Path:
-    return ENTERED_DIR / f"{season}-wk{week:02d}.json"
+    """`data/entered/<season>-wk<NN>.json`; a secondary slate's own under `data/slates/<key>/entered/`."""
+    from dfs import slate
+
+    return slate.path(ENTERED_DIR, "entered") / f"{season}-wk{week:02d}.json"
 
 
 @dataclass(frozen=True)

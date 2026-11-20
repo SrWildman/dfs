@@ -1895,7 +1895,7 @@ def render(
             "<!doctype html><html lang=en><head><meta charset=utf-8>"
             '<meta name=viewport content="width=device-width,initial-scale=1">'
             f'<meta name="dfs-week" content="{inp.season}-{inp.week:02d}">'
-            f"<title>Week {inp.week}, {inp.season}</title>"
+            f"<title>Week {inp.week}{_slate_title()}, {inp.season}</title>"
             f"<style>{CSS}{week_ui.CSS}{week_shade.CSS}{week_views.CSS}"
             f"{week_top.CASH_CSS}{week_money.LEDGER_CSS}{week_top.STRIP_CSS}{week_learn.CLOSE_CSS}"
             f"{week_style.CSS}{week_sunday.CSS}{week_tuesday.CSS}</style>"
@@ -1967,6 +1967,13 @@ document.addEventListener('click', (e) => {
   b.closest('tr').remove();
 });
 """
+
+
+def _slate_title() -> str:
+    """` Thursday` in the browser tab of a secondary slate's page (`slate.py`); "" on the main slate."""
+    from dfs import slate
+
+    return "" if slate.is_main() else f" {slate.DAY_NAMES[slate.DAYS[slate.current()]]}"
 
 
 def lock_view(inp: WeekInputs, sheet=None):  # noqa: ANN001, ANN201 - week_writes.LiveSheet, lock_state.LockView

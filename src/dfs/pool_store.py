@@ -48,8 +48,15 @@ class PoolSnapshot:
         )
 
 
+def pool_dir() -> Path:
+    """`data/pools/`; a secondary slate's own `data/slates/<key>/pools/` (`slate.py`)."""
+    from dfs import slate
+
+    return slate.path(POOL_DIR, "pools")
+
+
 def pool_path(season: int, week: int, directory: Path | None = None) -> Path:
-    return (directory or POOL_DIR) / f"{season}-wk{week:02d}.json"
+    return (directory or pool_dir()) / f"{season}-wk{week:02d}.json"
 
 
 def load(season: int, week: int, directory: Path | None = None) -> list[PoolSnapshot]:

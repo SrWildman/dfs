@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from dfs import paths, run_lock
+from dfs import run_lock
 from dfs.sheets import column_letter
 from dfs.sources.edge import POOL_HEADER, POOL_TYPE_OPTIONS
 
@@ -64,7 +64,9 @@ class NotFound(WriteError):
 
 
 def edits_log_path() -> Path:
-    return paths.DATA_DIR / "week" / "edits.log"
+    from dfs import slate
+
+    return slate.root() / "week" / "edits.log"
 
 
 @dataclass
