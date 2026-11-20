@@ -47,11 +47,17 @@ More view and on Everything.
   Saturday scan) | Builds, Game day, Ledger and plan, Last week, Season-long | Run a command, Everything. Where each
   block shows: `week_views.PLACES` (the page's own blocks) and `week_views.FOLD_PLACES` (each older fold: its More view
   and the day view that also shows it, e.g. the inactives check on Sunday and Game day).
-- **The design system** (`week_style.py`): tokens on `:root` with a dark mode, a type scale (11 chip, 12 meta, 13 dense,
+- **The design system** (`week_style.py`): colour tokens for both themes (`week_style.LIGHT` / `DARK`, written to `:root`,
+  the `prefers-color-scheme: dark` query and `data-theme=dark`), a type scale (11 chip, 12 meta, 13 dense,
   14 body, 16 section title, 22 headline number; weights 400 and 600), spacing 4 / 8 / 12 / 16 / 24 / 32, and the
   components new blocks are drawn with (header, status line, card and fold, table, player row, tag, trust chip,
-  candidate card, lineup card, checklist, More bar). Grey by default; the accent only for actions; good / warn / bad
+  lineup card, checklist, More bar). Grey by default; the accent only for actions; good / warn / bad
   only for outliers. The older blocks keep their class names: their variables (`--card`, `--dim`, ...) alias the tokens.
+  **No colour is hard-coded anywhere on the page** (Sam, 2026-11-19, after the open-spot cards were white on dark):
+  a colour literal outside a token fails `tests/test_week_style.py`; text on a filled colour is `--on-fill`; popovers
+  use `--pop`. `tests/test_week_contrast_browser.py` renders every state (`test_week_style.states`: nothing synced,
+  Saturday before and after a build, served and static, Sunday, Tuesday) on every day view and Everything, folds
+  and a drawer open, dark and light, 1440 and 390 px, in Chromium and Firefox, and fails on any text under 4.5:1.
 - **The pool square** on every name: 22 px, left of the name, C / G / B, `+` on hover, smaller inside running text;
   the same `dfsPool` store and popover as the pool chip below.
 
@@ -66,6 +72,14 @@ More view and on Everything.
   why, and the Play / Fade that used to sit in the decisions. His cash lineup (`your_cash_lineup`) is the Default when a
   run saved one, else the newest round's first cash build, else the cash lineup he entered. Information only. Then
   Phase A's cash board and open spots, the other decisions, and the digest folded.
+- **The cash board** keeps each core player to one line: the game, kickoff and the board's why ellipsed, the whole of
+  it on hover (and in his drawer), then "in N of M".
+- **Open spots** (`week_top.open_spots_html`; Sam, 2026-11-19) are compact rows in one table, not cards: per spot
+  the slot and its state, then one line per candidate (name, team and kickoff, the points difference, salary freed,
+  cash own, flags, "in N of M", **Pick**), the Default's player first in bold as the baseline (his projection and
+  salary), then "Someone else…". A spot with no alternative is one line ("TE: Kelce, nothing close at the price")
+  with "Someone else…". Answered: the pick's row is tinted and says Picked, Undo sits by the slot. At phone width
+  cash own, flags and "in N of M" drop out and the name wraps.
 - **"Someone else…" on each open spot**: a search over Sam's pool, limited to players who fit the slot (his position;
   RB / WR / TE for FLEX) and the salary (the Default's player's salary plus what the Default leaves), not already in
   the Default, each shown as a difference against the Default's player (points, salary freed, cash own) before he picks
@@ -149,7 +163,9 @@ More view and on Everything.
   3 "close" rows (`week_page.CHALK_CHECK_HEADER`, `CLOSE_COUNT`); the consensus in DK's roster order
   (`consensus.dk_order`) with `week_money.CONSENSUS_CAPTION`; and `week_page.table(..., how=...)`: every table and
   chart carries a "how this is built" note. Tests: `tests/test_week_ui.py` (HTML / script, no browser) and
-  `tests/test_week_ui_browser.py` (Playwright on a fake sheet; skipped where Chromium is not installed, as on CI).
+  `tests/test_week_ui_browser.py` (Playwright on a fake sheet, in Chromium and Firefox: the `browser` fixture in
+  `tests/conftest.py`, `BROWSER_ENGINES`; Sam's browser is Zen, Firefox-based; an engine not installed is skipped,
+  as on CI). The page sets `history.scrollRestoration = 'manual'`: Firefox's own restore fought the page's on reload.
 
 ## Run panel, pool chips, colour, captions
 

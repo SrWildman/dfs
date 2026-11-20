@@ -411,7 +411,8 @@ def test_the_cash_fold_shows_the_default_its_band_core_and_open_spots_and_never_
     assert "Default cash lineup: 131.3 pts" in text and "lean: cash builds have cashed 14 of 25" in text
     assert "Open spots (1): FLEX: Puka Nacua or Wan'Dale Robinson" in text
     assert 'id="cash-board"' in page and 'id="open-spots"' in page and 'id="cash-lineup"' in page
-    assert "+$1,200 freed" in text and "-1.1 pts" in text
+    flat = " ".join(text.split())
+    assert "+$1,200 freed" in flat and "-1.1 pts" in flat
     line, _ = week_page.fold_line("cash", inp, {"cash": week_page.cash_section(inp)})
     assert line == "Default 131.3 pts, 1 open spot"
     for block in ("cash-board", "open-spots", "cash-lineup"):

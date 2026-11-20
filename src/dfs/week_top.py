@@ -348,23 +348,36 @@ CASH_CSS = """
 .cashgrid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px;align-items:start;margin:12px 0}
 @media (max-width:900px){.cashgrid{grid-template-columns:1fr}}
 .crow{display:grid;grid-template-columns:40px minmax(0,1fr) 68px 64px 70px max-content;gap:8px;align-items:center;
-  padding:8px 10px;border-top:1px solid var(--line,#e4e7eb)}
-.crow:first-child{border-top:0}.crow.chead{font-size:11px;color:#8a929c;text-transform:uppercase}
-.crow .posb{font-size:11px;font-weight:650;color:#59626d;background:#eef0f3;border-radius:5px;text-align:center}
-.crow .who .sub,.cand .gm,.slotrow .tm{font-size:12px;color:#6b7480}.crow .who .why{font-size:12px}
-.crow .num{text-align:right}.crow.faded .who b,.crow.faded .num{opacity:.45;text-decoration:line-through}
+  padding:8px 10px;border-top:1px solid var(--line)}
+.crow:first-child{border-top:0}.crow.chead{font-size:11px;color:var(--ink-3);text-transform:uppercase}
+.crow .posb{font-size:11px;font-weight:600;color:var(--ink-2);background:var(--sunk);border-radius:5px;text-align:center}
+.crow .who{display:flex;align-items:baseline;gap:6px;min-width:0;white-space:nowrap}
+.crow .who>b,.crow .who .chip{flex:none;margin:0}
+.crow .who .desc{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--ink-2)}
+.crow .num{text-align:right}.crow.faded .who b,.crow.faded .num{text-decoration:line-through;color:var(--ink-2)}
 .crow .opts{justify-self:end}
-.spots{display:grid;gap:10px}.spot h3{margin:0 0 6px;font-size:13px}.spot h3 span{font-weight:400;color:#6b7480}
-.cands{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}
-@media (max-width:700px){.cands{grid-auto-flow:row}.crow{grid-template-columns:34px minmax(0,1fr) 54px max-content}.crow>.num:nth-of-type(3),.crow>.num:nth-of-type(4){display:none}}
-.cand{text-align:left;background:#fff;border:1px solid #d9dde3;border-radius:8px;padding:8px 10px;display:flex;
-  flex-direction:column;gap:2px;min-width:0;font:inherit;color:inherit}
-.cand[aria-pressed=true]{border-color:#2457c5;background:#eef3fd}.cand .nm{font-weight:650}
-.cand .d{display:flex;justify-content:space-between;gap:6px;font-size:12.5px}.cand .d i{font-style:normal;color:#6b7480}
-.cand .g{color:#1a7a43}.cand .rd{color:#b42318}.cand .a{color:#b25e09}
+@media (max-width:700px){.crow{grid-template-columns:34px minmax(0,1fr) 54px max-content}
+  .crow>.num:nth-of-type(3),.crow>.num:nth-of-type(4){display:none}}
+.chip.near{background:var(--sunk);color:var(--ink-2)}
+table.spt td{white-space:nowrap}
+table.spt td.who{max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis}
+table.spt td.who .meta{margin-left:6px}
+table.spt tr.base td{font-weight:600}table.spt tr.base td .meta{font-weight:400}
+table.spt tr.grp td{white-space:normal;color:var(--ink)}
+table.spt tr.grp .state{font-weight:400;color:var(--ink-2);margin-left:6px}
+table.spt tr.grp .undo{margin-left:8px;font-size:12px;padding:1px 8px}
+table.spt tr.picked td{background:var(--accent-soft)}
+table.spt .g{color:var(--good)}table.spt .rd{color:var(--bad)}table.spt .a{color:var(--warn)}
+table.spt .chip{margin:0}
+table.spt tr.one td{white-space:normal}
+table.spt tr.one .line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+table.spt .other{margin:0}table.spt tr.one .other[open]{flex-basis:100%}
+table.spt tr.else td{padding-top:2px}
+@media (max-width:700px){table.spt td.who{white-space:normal;max-width:none;overflow:visible}
+  table.spt td.who .meta{display:block;margin-left:0}table.spt .u{display:none}}
 .slotrow{display:grid;grid-template-columns:44px minmax(0,1fr) 64px 22px;gap:8px;padding:6px 10px;
-  border-top:1px solid #eef0f3}.slotrow .sl{font-size:11px;font-weight:650;color:#59626d}
-.slotrow .open{color:#8a929c;font-style:italic}
+  border-top:1px solid var(--line)}.slotrow .sl{font-size:11px;font-weight:600;color:var(--ink-2)}
+.slotrow .tm{font-size:12px;color:var(--ink-2)}.slotrow .open{color:var(--ink-2);font-style:italic}
 """
 
 
@@ -409,17 +422,23 @@ def cash_board_html(core: dict, ds: list[wb.Decision], why: dict[str, str], live
         if c.get("faded"):
             rows.append(
                 f'<div class="crow faded"><span class="posb">-</span><div class="who"><b>{e(c["name"])}</b>'
-                '<span class="sub"> faded: the next run built without him</span></div><span></span><span></span>'
+                '<span class="desc">faded: the next run built without him</span></div><span></span><span></span>'
                 f'<span></span><div class="opts">{_cash_controls(d, live)}</div></div>'
             )
             continue
         d = d or by_key.get(f"core:{c.get('id', '')}")
-        status = f' <span class="chip q">{e(c["status"])}</span>' if c.get("status") else ""
+        status = f'<span class="chip q">{e(c["status"])}</span>' if c.get("status") else ""
+        # one line: the game and the board's why ellipsed, the whole of it on hover and in the drawer
+        desc = " · ".join(
+            x
+            for x in (f"{c.get('team', '')} vs {c.get('opp', '')}", _when(c), why.get(c["name"], ""))
+            if x.strip()
+        )
         rows.append(
             f'<div class="crow"><span class="posb">{e(c.get("position", ""))}</span>'
             f'<div class="who"><b>{pl({"Name": c["name"], "Id": c.get("id", ""), "Team": c.get("team", "")})}</b>'
-            f'<span class="sub"> {e(c.get("team", ""))} vs {e(c.get("opp", ""))} · {e(_when(c))}</span>{status}'
-            f'<span class="why"> · {e(why.get(c["name"], ""))}</span> <span class="chip">in {c.get("in", 0)} of {of}</span>'
+            f'<span class="desc" title="{e(desc)}">{e(desc)}</span>{status}'
+            f'<span class="chip near">in {c.get("in", 0)} of {of}</span>'
             f'</div><span class="num">{_money(c.get("salary"))}</span>'
             f'<span class="num"><b>{num(c.get("projection")) or 0:.1f}</b></span>'
             f'<span class="num">{e(pct(num(c.get("cash_own"))) if c.get("cash_own") is not None else "-")}</span>'
@@ -442,84 +461,113 @@ def cash_board_html(core: dict, ds: list[wb.Decision], why: dict[str, str], live
     )
 
 
-def _cand_html(c: dict, base: dict, i: int, d: wb.Decision | None, live: bool, of: str) -> str:
+SPOTS_COLS = 7  # player (name, team, kickoff), points, salary, cash own, flags, in N of M, Pick
+
+
+def _pick_cell(c: dict, d: wb.Decision | None, live: bool) -> str:
+    """Pick for a candidate (the spot's option is his Id); "Picked" on the answered one; blank on the rest."""
+    if d is not None and d.answer:
+        return '<span class="answer">Picked</span>' if d.answer == c.get("id") else ""
+    if live and d is not None:
+        return f'<button type="button" class="opt" data-key="{e(d.key)}" data-opt="{e(c.get("id", ""))}">Pick</button>'
+    return '<button type="button" disabled>Pick</button>'
+
+
+def _cand_row(c: dict, i: int, d: wb.Decision | None, live: bool, of: str) -> str:
+    """One line per candidate. The Default's player (i == 0) is the baseline, in bold: his projection and
+    salary; each alternative is a difference against him (points, salary freed). Colour only at 2+ points,
+    amber at 45%+ owned."""
     own = num(c.get("cash_own"))
-    own_txt = pct(own) if own is not None else "-"
     if i == 0:
-        proj = f"<span>{num(c.get('projection')) or 0:.1f} pts</span>"
-        sal = f"<span>{_money(c.get('salary'))}</span>"
-        label = "projection"
+        pts = f'{num(c.get("projection")) or 0:.1f}<span class="u"> pts</span>'
+        sal = _money(c.get("salary"))
     else:
         dp = num(c.get("d_points")) or 0.0
         cls = "g" if dp >= 2 else "rd" if dp <= -2 else ""
-        proj = f'<b class="{cls}">{dp:+.1f} pts</b>'
+        pts = f'<span class="{cls}">{dp:+.1f}<span class="u"> pts</span></span>'
         fr = int(num(c.get("d_salary")) or 0)
-        sal = f"<b>{'+' if fr >= 0 else '-'}${abs(fr):,} {'freed' if fr >= 0 else 'more'}</b>"
-        label = "vs " + wb.short_name(str(base.get("name", "")))
-    flags = " ".join(f'<span class="chip q">{e(f)}</span>' for f in c.get("flags") or []) or "no flags"
-    pressed = "true" if d is not None and d.answer and d.answer == c.get("id") else "false"
-    attrs = (
-        f'class="cand opt" data-key="{e(d.key)}" data-opt="{e(c.get("id", ""))}"'
-        if live and d is not None and not d.answer
-        else 'class="cand" disabled'
-    )
+        sal = f'{"+" if fr >= 0 else "-"}${abs(fr):,}<span class="u"> {"freed" if fr >= 0 else "more"}</span>'
+    flags = " ".join(f'<span class="chip q">{e(f)}</span>' for f in c.get("flags") or [])
+    meta = f"{c.get('team', '')} vs {c.get('opp', '')} · {_when(c)}"
+    picked = d is not None and bool(d.answer) and d.answer == c.get("id")
+    cls = " ".join(x for x in ("base" if i == 0 else "", "picked" if picked else "") if x)
     return (
-        f'<button type="button" {attrs} aria-pressed="{pressed}"><span class="nm">{e(c.get("name", ""))}</span>'
-        f'<span class="gm">{e(c.get("team", ""))} vs {e(c.get("opp", ""))} · {e(_when(c))}</span>'
-        f'<span class="d"><i>{e(label)}</i>{proj}</span><span class="d"><i>salary</i>{sal}</span>'
-        f'<span class="d"><i>cash own</i><b class="{"a" if own is not None and own >= 0.45 else ""}">{e(own_txt)}</b></span>'
-        f'<span class="d"><i>status</i><span>{flags}</span></span>'
-        f'<span class="chip">in {c.get("in", 0)} of {e(of)}</span></button>'
+        f'<tr class="{cls}">'
+        f'<td class="who" title="{e(c.get("name", ""))} · {e(meta)}">'
+        f"{pl({'Name': c.get('name', ''), 'Id': c.get('id', ''), 'Team': c.get('team', '')})}"
+        f'<span class="meta">{e(meta)}</span></td>'
+        f'<td class="n">{pts}</td><td class="n">{sal}</td>'
+        f'<td class="n hm{" a" if own is not None and own >= 0.45 else ""}">{e(pct(own) if own is not None else "-")}</td>'
+        f'<td class="hm">{flags}</td><td class="hm"><span class="chip near">in {c.get("in", 0)} of {e(of)}</span></td>'
+        f'<td class="acts">{_pick_cell(c, d, live)}</td></tr>'
+    )
+
+
+def _someone_else(d: wb.Decision | None, opts: list[dict] | None, live: bool) -> str:
+    if not opts or d is None or d.answer:
+        return ""
+    data = json.dumps(opts, separators=(",", ":")).replace("</", "<\\/")
+    return (
+        f'<details class="other" data-key="{e(d.key)}" data-live="{1 if live else 0}">'
+        "<summary>Someone else…</summary>"
+        '<input type="search" placeholder="Search your pool" aria-label="Search your pool for this spot">'
+        '<div class="olist"></div>'
+        f'<script type="application/json" class="odata">{data}</script></details>'
     )
 
 
 def open_spots_html(
     core: dict, ds: list[wb.Decision], live: bool, options: dict[str, list[dict]] | None = None
 ) -> str:
-    """Each open spot: the Default's player and up to two single swaps, as differences against him (points,
-    salary freed, cash ownership, status). Colour only at 2+ points, amber at 45%+ owned. A pick writes
+    """Each open spot as compact rows in one table (Sam, 2026-11-19): the slot and its state, then one line
+    per candidate (name, team and kickoff, the projection difference, salary freed, cash own, flags, "in N of
+    M", Pick), the Default's player first in bold as the baseline, then "Someone else…". A spot with no
+    alternative is one line ("TE: Kelce, nothing close at the price") with "Someone else…". A pick writes
     `cash: Name` on Always use and reruns the cash build (`--iterate --only cash`)."""
     from dfs import cash_core as cc
 
     of = f"{core.get('near', 0)}+" if core.get("near_truncated") else str(core.get("near", 0))
     by_key = {d.key: d for d in ds}
-    cards = []
+    groups = []
     for s in core.get("open") or []:
-        d = by_key.get(f"spot:{s.get('slot', '')}")
+        slot = str(s.get("slot", ""))
+        d = by_key.get(f"spot:{slot}")
         base = s.get("default") or {}
-        cands = [base, *(s.get("alternatives") or [])]
-        body = "".join(_cand_html(c, base, i, d, live, of) for i, c in enumerate(cands))
-        if not s.get("alternatives"):
-            body += f'<p class="dim">{e(cc.NOTHING_AT_THE_PRICE)}</p>'
-        state = (
-            e(d.answer_text)
-            if d is not None and d.answer
-            else "pick one: the near-optimal lineups differ here"
-        )
+        answered = d is not None and bool(d.answer)
         undo = (
-            f' <button type="button" class="undo" data-key="{e(d.key)}">Undo</button>'
+            f'<button type="button" class="undo" data-key="{e(d.key)}">Undo</button>'
             if live and d is not None and d.answer and d.undo
             else ""
         )
-        other = ""
-        opts = (options or {}).get(str(s.get("slot", "")))
-        if opts and not (d is not None and d.answer) and d is not None:
-            data = json.dumps(opts, separators=(",", ":")).replace("</", "<\\/")
-            other = (
-                f'<details class="other" data-key="{e(d.key)}" data-live="{1 if live else 0}">'
-                "<summary>Someone else…</summary>"
-                '<input type="search" placeholder="Search your pool" aria-label="Search your pool for this spot">'
-                '<div class="olist"></div>'
-                f'<script type="application/json" class="odata">{data}</script></details>'
+        other = _someone_else(d, (options or {}).get(slot), live)
+        if not s.get("alternatives"):
+            name = pl({"Name": base.get("name", ""), "Id": base.get("id", ""), "Team": base.get("team", "")})
+            state = f'<span class="state">{e(d.answer_text)}</span>{undo}' if answered else ""
+            groups.append(
+                f'<tbody class="spot" data-slot="{e(slot)}"><tr class="one"><td colspan="{SPOTS_COLS}">'
+                f'<div class="line"><span><b>{e(slot)}</b>: {name}, '
+                f'<span title="{e(cc.NOTHING_AT_THE_PRICE)}">nothing close at the price</span>{state}</span>'
+                f"{other}</div></td></tr></tbody>"
             )
-        cards.append(
-            f'<div class="card spot"><h3>{e(s.get("slot", ""))} <span>{state}</span>{undo}</h3>'
-            f'<div class="cands">{body}</div>{other}</div>'
+            continue
+        state = e(d.answer_text) if answered else "pick one: the near-optimal lineups differ here"
+        rows = "".join(
+            _cand_row(c, i, d, live, of) for i, c in enumerate([base, *(s.get("alternatives") or [])])
         )
-    if not cards:
+        tail = f'<tr class="else"><td colspan="{SPOTS_COLS}">{other}</td></tr>' if other else ""
+        groups.append(
+            f'<tbody class="spot" data-slot="{e(slot)}"><tr class="grp"><td colspan="{SPOTS_COLS}">'
+            f'{e(slot)}<span class="state">{state}</span>{undo}</td></tr>{rows}{tail}</tbody>'
+        )
+    if not groups:
         inner = '<p class="ok">Every near-optimal lineup agrees. Nothing to decide.</p>'
     else:
-        inner = f'<div class="spots">{"".join(cards)}</div>'
+        inner = (
+            '<div class="sec-b flush"><table class="t spt"><thead><tr><th>Player</th><th class="n">Pts</th>'
+            '<th class="n">Salary</th><th class="n hm">Cash own</th><th class="hm">Flags</th>'
+            '<th class="hm">Near lineups</th><th></th></tr></thead>'
+            f"{''.join(groups)}</table></div>"
+        )
     say_line = (
         ""
         if live

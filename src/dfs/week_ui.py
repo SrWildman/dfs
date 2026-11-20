@@ -41,7 +41,7 @@ border-bottom:1px dotted var(--dim);outline-offset:2px}
 .tbl{margin:4px 0 8px}.tbl>.how{display:inline-block;margin:0 0 2px}
 .how:hover::after,.how:focus::after,.how.show::after{content:attr(data-how);position:absolute;left:0;top:130%;
 width:min(380px,80vw);white-space:normal;z-index:40;background:var(--ink);color:var(--card);border-radius:7px;
-padding:7px 10px;font-size:12.5px;line-height:1.4;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+padding:7px 10px;font-size:12.5px;line-height:1.4;box-shadow:var(--pop)}
 .card-head .how:hover::after,.card-head .how:focus::after,.card-head .how.show::after{left:auto;right:0}
 .chip.chalk{background:var(--accent-soft);color:var(--bad);border:1px solid currentColor}
 .chip.close{background:transparent;color:var(--dim);border:1px dashed currentColor}
@@ -54,7 +54,7 @@ border-radius:9px;background:transparent;color:var(--dim);cursor:pointer;vertica
 .pchip.in{border-style:solid;border-color:var(--accent);color:var(--accent);font-weight:600}
 .pchip:hover{border-color:var(--accent);color:var(--accent)}
 #pool-pop{position:absolute;z-index:60;background:var(--card);border:1px solid var(--line);border-radius:8px;
-padding:8px 10px;box-shadow:0 6px 24px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:6px;max-width:300px}
+padding:8px 10px;box-shadow:var(--pop);display:flex;flex-direction:column;gap:6px;max-width:300px}
 #pool-pop b{font-size:13px}#pool-pop p{margin:0;font-size:11.5px}
 button.addpool{font-size:11px;padding:0 6px;margin-left:3px;border:1px solid var(--accent);border-radius:9px;
 background:var(--accent-soft);color:var(--accent);cursor:pointer;font-weight:600}
@@ -62,7 +62,7 @@ a.pl-unknown{text-decoration:none;color:inherit;cursor:text}
 tr.pool-bad td{box-shadow:inset 0 -2px 0 var(--bad)}
 .poolval{font-size:12px;color:var(--dim);white-space:nowrap}.poolval.in{color:var(--accent);font-weight:600}
 #bulkbar{position:sticky;bottom:10px;z-index:15;margin:10px auto;max-width:980px;background:var(--card);
-border:2px solid var(--accent);border-radius:10px;padding:8px 12px;box-shadow:0 6px 18px rgba(0,0,0,.18);
+border:2px solid var(--accent);border-radius:10px;padding:8px 12px;box-shadow:var(--pop);
 display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:13.5px}
 #bulkbar[hidden]{display:none}#bulkbar .names{color:var(--dim);flex:1 1 220px;min-width:0;overflow:hidden;
 text-overflow:ellipsis;white-space:nowrap}
@@ -79,7 +79,7 @@ padding:6px 10px;margin:4px 0;display:flex;flex-wrap:wrap;gap:4px 10px;align-ite
 .vbar{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);
 background:var(--card)}
 .vbar h2{margin-right:6px}.vbar .grp{display:inline-flex;gap:3px;align-items:center;flex-wrap:wrap}
-.vbar button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.vbar button.on{background:var(--accent);color:var(--on-fill);border-color:var(--accent)}
 .vbar label{font-size:13px;display:inline-flex;gap:3px;align-items:center}
 .vbar .x{margin-left:auto;font-size:18px;line-height:1;padding:2px 10px}
 .vbody{flex:1;display:flex;min-height:0}
@@ -432,6 +432,8 @@ function drawBulk() {
 
 /* ---------- page state across refreshes and reloads (item 5) ---------- */
 const UKEY = 'ui-' + WEEK;
+/* the page puts its own scroll back (below); the browser's restoring it too fought that in Firefox */
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 const U = Object.assign({open: {}, more: [], scroll: 0, boxes: {}}, store.get(UKEY, {}));
 if (!U.boxes || typeof U.boxes !== 'object') U.boxes = {};
 function scroller() { const pc = $('#pagecol'); return pc && getComputedStyle(pc).overflowY === 'auto' && pc.scrollHeight > pc.clientHeight ? pc : null; }

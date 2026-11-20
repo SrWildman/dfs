@@ -260,7 +260,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 
 - **The tests** (`tests/conftest.py`; the study behind it is `docs/planning/audit/TEST_SPEED.md`). A bare `pytest -n 6 --dist loadfile`
   is the **editing run**: it leaves out every test marked `slow` (about a second or more: the lineup search's files,
-  `tests/sim`'s long studies, individual tests elsewhere) and `browser` (Playwright; skipped anyway where Chromium is not
+  `tests/sim`'s long studies, individual tests elsewhere) and `browser` (Playwright, Chromium and Firefox; skipped anyway where an engine is not
   installed), says "N slow/browser/exhaustive tests not run", and **fails an unmarked test over 3 s** ("mark it slow or make it
   faster"; `--speed-guard SECONDS`, 0 turns it off). **Naming a file or a test (`pytest tests/test_plays.py`) runs everything
   in it.** **`pytest --full -n 6 --dist loadfile` is required before every PR**, locally, and CI runs the same with
