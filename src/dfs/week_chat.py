@@ -154,8 +154,8 @@ def shortcuts_prompt(root: Path | None = None) -> str | None:
 
 def slate_note() -> str:
     """On a secondary slate's page (`dfs week serve --slate thu`), one paragraph first in the chat's prompt:
-    which slate this is, that every `dfs` command here works on it (DFS_SLATE is set), and that the main-only
-    commands refuse it. "" on the main slate, so its prompt is unchanged."""
+    which slate this is, that every `dfs` command here works on it (DFS_SLATE is set), and that the
+    season-long and login commands refuse it. "" on the main slate, so its prompt is unchanged."""
     from dfs import slate
 
     if slate.is_main():
@@ -165,9 +165,9 @@ def slate_note() -> str:
         f"This Week page is the {day} slate's ({slate.current()}), a secondary slate of the week, not the "
         "main "
         f"Sunday slate. {slate.ENV_VAR}={slate.current()} is set, so every `dfs` command run here works on "
-        "that slate's own sheet and files (a shortcut's commands included). Commands that are the main "
-        "slate's only (the close, results, research, the contests engine) refuse it: say so, and that they "
-        "run from a terminal without the slate.\n\n"
+        "that slate's own sheet and files (a shortcut's commands included), the close, results and research "
+        "too. Only the season-long (`dfs season`) and login (`dfs auth`) commands refuse it: say so, and "
+        "that they run from a terminal without the slate.\n\n"
     )
 
 

@@ -68,6 +68,9 @@ DERIVED_COLUMNS = [
     "Multiple",
 ]
 LOG_COLUMNS = HISTORY_COLUMNS + DERIVED_COLUMNS
+# The slate key a close tags each entry with (`slate.SLATE_COLUMN`, `slate_close.tag_log`): an extra column,
+# kept like any other the log carries; absent until a secondary slate is configured.
+SLATE_KEY_COLUMN = "SlateKey"
 
 MAIN_SLATE_WEEKDAY = 6  # Sunday
 MAIN_SLATE_HOURS = range(12, 18)  # kickoff 12:00-17:59 ET, as in dk_salaries._is_sunday_afternoon
@@ -311,4 +314,6 @@ def typed(log: pd.DataFrame) -> pd.DataFrame:
     out["payout_ratio"] = (out["places_paid"].astype("Float64") / out["entries"].astype("Float64")).astype(
         "Float64"
     )
+    if SLATE_KEY_COLUMN in log.columns:  # the slate each entry was booked to (`slate_close.tag_log`)
+        out["slate_key"] = log[SLATE_KEY_COLUMN].astype(str).to_numpy()
     return out.reset_index(drop=True)

@@ -190,8 +190,15 @@ def contest_rows(  # noqa: ANN001 - contest: a RealContest
     return out
 
 
+def _path(path: Path | None) -> Path:
+    """`data/contests/edge_at_lock.csv`, or a secondary slate's own (`slate.data_path`)."""
+    from dfs import slate
+
+    return path or slate.data_path(PATH)
+
+
 def read(path: Path | None = None) -> list[dict]:
-    p = path or PATH
+    p = _path(path)
     if not p.exists():
         return []
     with p.open(newline="") as fh:
@@ -199,15 +206,19 @@ def read(path: Path | None = None) -> list[dict]:
 
 
 def replace_week(rows: list[dict], season: int, week: int, path: Path | None = None) -> None:
-    """Write `rows` as the week's rows, keeping every other week's (a recompute replaces only its week)."""
-    p = path or PATH
+    """Write `rows` as the week's rows, keeping every other week's (a recompute replaces only its week). A
+    secondary slate's rows carry its key."""
+    from dfs import slate
+
+    p = _path(path)
+    rows = [slate.stamp(r) for r in rows]
     keep = [
         r for r in read(p) if not (str(r.get("season")) == str(season) and str(r.get("week")) == str(week))
     ]
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".csv.tmp")
     with tmp.open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=COLUMNS, extrasaction="ignore")
+        w = csv.DictWriter(fh, fieldnames=slate.columns(COLUMNS), extrasaction="ignore")
         w.writeheader()
         for r in sorted(
             [*keep, *rows], key=lambda r: (int(r["season"]), int(r["week"]), str(r["contest_key"]))

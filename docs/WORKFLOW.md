@@ -545,21 +545,38 @@ Week 12 main (`slate_chain.py`). Each has its own Bankroll tab, its own Season r
 sheet's Starting Bankroll is the previous slate's Ending Bankroll. The weekly budget is each sheet's own (its
 Bankroll tab's Weekly Budget), and each slate's page shows its own entries against its own plan.
 
-**The close, one per slate.** `dfs week close --slate thu` books the entries whose contest is a Classic one
-starting on that slate's day into the Thanksgiving sheet's Bankroll and Season row ("12 Thu"), keeps its DK
-files (its standings apart, in `data/slates/thu/dk_standings/`) and prints its spend against its own plan. The
-main `dfs week close` leaves those entries out (each entry is booked once, in one ledger; Thanksgiving night's
-Showdown is the main week's) and first re-reads Thanksgiving's Ending into Week 12's Starting Bankroll. The
-learning is still the main slate's: Results' Cash Pts and H2H leave the secondary slate's contests out, and the
-ownership log, the double-up line, the copies estimate, the cash post-mortem, edge at lock, the scorecards and
-Model Check never see its standings.
+**The close, one per slate.** `dfs week close --slate thu` (add `--research` as on Monday) is a full close, the
+same steps as the main one, all on the Thanksgiving sheet and `data/slates/thu/`. It books the entries whose
+contest is a Classic one starting on that slate's day into the Thanksgiving sheet's Bankroll, Season row and
+Results row (both "12 Thu", inserted between 11 and 12), keeps its DK files (its standings apart, in
+`data/slates/thu/raw/dk_standings/`), scores its players once that day's games are final (`dfs results update
+--slate thu`: only players kicking off that day, so Sunday's never count), and runs its cash post-mortem, edge
+at lock, its four scorecards and you against the build, its spend against its own plan, Model Check on its
+sheet and its Tuesday view ("After" on its page). The main `dfs week close` leaves those entries out (each entry
+is booked once, in one ledger; Thanksgiving night's Showdown is the main week's) and first re-reads
+Thanksgiving's Ending into Week 12's Starting Bankroll and its Season and Results rows into Week 12's tabs.
+`--research` writes its own report, `docs/research/weekly/<season>-wk12-thu-close.md` (`dfs research close-report
+--slate thu` reruns it): the weekly scorecards only, since the monthly studies refit main's models.
+
+**Every record is tagged.** Each file a slate's close writes is its own, under `data/slates/thu/` (the
+post-mortem, edge at lock, the scorecard, the ownership log, the scored table, the decision log, ...), and every
+row in it carries `SlateKey` = `thu`. The account's one contest log (`data/contests/contest_log.csv`) gets a
+`SlateKey` column too, each entry tagged with the slate whose ledger it is (`main` or `thu`) and never retagged.
+Main's files keep their paths and columns.
+
+**The fitted models are main's.** The calibration, Model Check's own fits, the double-up line, the copies
+estimate, the ownership fit and the calls weights fit on main slates. A slate's close reads them and says it did
+not refit them. `[learning] fit_secondary_slates = true` in config.toml adds every secondary slate's scored
+players to the scored-table fits (calibration, Model Check, the ownership refit) and lets a slate's close
+refit the double-up line and the copies estimate; those two, the ownership fit's contest table and the calls
+weights still read main's standings only, one week at a time.
 
 **Set Week 12 main up first if you like.** Its start is then Thanksgiving's start; once Thanksgiving is closed,
 `dfs bankroll carry` re-reads Thanksgiving's Ending into Week 12's start (with a read-back; `--dry-run` shows it
 first), and the Week 12 main close runs it on its own anyway.
 
-**What is the main slate's only.** Every other command refuses `--slate` (and `DFS_SLATE`) before it runs:
-`results update`, the contests engine, research, the model and the simulator commands.
+**Every command takes `--slate`.** Only the season-long commands (`dfs season`) and the logins (`dfs auth`)
+have nothing to do with a DraftKings slate, and refuse it (and `DFS_SLATE`) before they run.
 
 **If anything fails, play it by hand:** build on the slate's sheet (or in DraftKings) yourself; the main slate
 is untouched either way.

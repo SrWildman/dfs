@@ -375,9 +375,12 @@ def csv_rows(pm: PostMortem) -> pd.DataFrame:
 
 
 def append_csv(pm: PostMortem, path: Path | None = None) -> Path:
-    """Add the week's rows to the running file, replacing any rows the week already had."""
-    path = path or POSTMORTEM_CSV
-    new = csv_rows(pm)
+    """Add the week's rows to the running file, replacing any rows the week already had. A secondary slate
+    keeps its own file (`slate.data_path`), each row with its key."""
+    from dfs import slate
+
+    path = path or slate.data_path(POSTMORTEM_CSV)
+    new = slate.tag(csv_rows(pm))
     if path.exists() and path.stat().st_size:
         old = pd.read_csv(path)
         old = old[~((old["season"] == pm.season) & (old["week"] == pm.week))]

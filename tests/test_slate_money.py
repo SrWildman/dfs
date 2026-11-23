@@ -42,6 +42,18 @@ ROWS = [
     "$18.00,1",
 ]
 
+RESULTS_HEADER = (
+    "Week",
+    "Cash Pts",
+    "Cash Line",
+    "Cash Results",
+    "H2H Entered",
+    "H2H Win",
+    "H2H %",
+    "Red",
+    "Blue",
+    "Black",
+)
 CASH = {"header_row": 38, "first_row": 39, "last_row": 83}
 GPP = {"header_row": 85, "first_row": 86, "last_row": 149}
 _REF = re.compile(r"(\$?)([A-Z]+)(\$?)(\d+)")
@@ -70,6 +82,17 @@ class Sheet:
                 self.cells["Season"][f"{column_letter(column_index('T') + c)}{r}"] = v
         for c, name in zip("RS", ("Other Net", "Other Risked"), strict=True):
             self.cells["Season"][f"{c}1"] = name
+        # Results as the template has it: weeks 1-18 in rows 2-19, one blank formula row, the averages at 23
+        res = self.cells["Results"]
+        for c, name in zip("ABCDEFGHIJ", RESULTS_HEADER, strict=True):
+            res[f"{c}1"] = name
+        for r in range(2, 21):
+            if r <= 19:
+                res[f"A{r}"] = r - 1
+            res[f"D{r}"] = f'=IF(B{r}, B{r}>=C{r}, "")'
+            res[f"G{r}"] = f'=IF(E{r}="","",IFERROR(F{r}/E{r},""))'
+        res["B23"] = '=IF(COUNT(B2:B20)=0,"",AVERAGE(B2:B20))'
+        res["E23"] = "=SUM(E2:E22)"
 
     # SheetsClient
     def describe(self):
@@ -160,6 +183,13 @@ class Sheet:
 
     def add_line_chart(self, *a, **k):
         pass
+
+    def results_labels(self):
+        out, r = [], 2
+        while str(self.cells["Results"].get(f"A{r}", "")).strip():
+            out.append(str(self.cells["Results"][f"A{r}"]))
+            r += 1
+        return out
 
     # a tiny evaluator for the Season tab's SUM / + formulas
     def value(self, tab, cell):
@@ -314,6 +344,19 @@ def _assert_week_12(sheets, w12_start_expected=110.0):
     ytd = next(r for r in range(20, 40) if w12.cells["Season"].get(f"A{r}") == "Total")
     assert w12.value("Season", f"B{ytd}") == 5.0
     assert w12.value("Season", f"C{ytd}") == 33.0  # risked: Week 11 5, Thanksgiving 8, Week 12 20
+    # Results: Thanksgiving's own row on both sheets, from its own entries; Week 12's from the main slate's
+    for sheet in (thu, w12):
+        labels = sheet.results_labels()
+        assert labels[10:13] == ["11", "12 Thu", "12"] and labels[-1] == "18" and len(labels) == 19
+        r = labels.index("12 Thu") + 2
+        assert sheet.cells["Results"][f"B{r}"] == 120.5  # E1, the Thanksgiving double-up
+        assert sheet.cells["Results"][f"D{r}"] == f'=IF(B{r}, B{r}>=C{r}, "")'  # its own formulas
+        assert sheet.cells["Results"][f"G{r}"] == f'=IF(E{r}="","",IFERROR(F{r}/E{r},""))'
+    labels = w12.results_labels()
+    r12 = labels.index("12") + 2
+    assert w12.cells["Results"][f"B{r12}"] == 100.25  # E4, the main slate's double-up (E1 is not in it)
+    assert (w12.cells["Results"][f"E{r12}"], w12.cells["Results"][f"F{r12}"]) == (1, 1)  # E5's H2H
+    assert w12.cells["Results"]["B24"] == '=IF(COUNT(B2:B21)=0,"",AVERAGE(B2:B21))'  # the range grew
 
 
 def _history_entries():
@@ -377,7 +420,7 @@ def test_a_close_run_twice_books_nothing_twice_and_inserts_one_row(season, monke
     _close(monkeypatch, base, "THU", csv, thu=True)
     assert sheets["THU"].ledger_keys() == ["E1", "E2"]
     assert sheets["THU"].labels().count("12 Thu") == 1
-    assert len(sheets["THU"].inserted) == 1
+    assert sorted(sheets["THU"].inserted) == [("Results", 13), ("Season", 13)]  # one row on each tab
 
 
 def test_a_slate_whose_week_cannot_be_told_stops_the_close_before_any_booking(season, monkeypatch):

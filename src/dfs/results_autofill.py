@@ -87,7 +87,10 @@ def write_results_updates(
     `updates` with no matching row in Results is silently skipped, not
     an error -- it just means that week's row hasn't been reached yet).
     """
+    from dfs import results_rows
+
     tab = results_cfg.tab
+    results_cfg = results_rows.span(client, results_cfg)  # grown by any slate row ("12 Thu") above week 18
     a_values = client.read_range(tab, f"A{results_cfg.first_row}:A{results_cfg.last_row}")
     row_by_week: dict[int, int] = {}
     for i, row in enumerate(a_values):

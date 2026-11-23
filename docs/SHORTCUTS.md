@@ -78,7 +78,7 @@ used: the slate's own, never the main week's.
 | "record my thanksgiving entries" | `dfs entries record --slate thu` (he downloads the Thanksgiving entries file; never fetch it) | how many lineups and the contests each went into |
 | "thanksgiving late swap" | `dfs lineups late-swap --refresh-injuries --slate thu` | the same as "late swap", for the Thanksgiving lineups |
 | "open thanksgiving" | `dfs week serve --slate thu` | the link it opened (a second page beside the main one) |
-| "close thanksgiving" | `dfs week close --slate thu`, detached with a log (he downloads the history export and the Thanksgiving standings first; never fetch them) | the entries booked on the Thanksgiving sheet, its Season row ("12 Thu") and Ending Bankroll, its spend against its plan |
+| "close thanksgiving" | `dfs week close --research --slate thu`, detached with a log (he downloads the history export and the Thanksgiving standings first; never fetch them) | the entries booked on the Thanksgiving sheet, its Season and Results rows ("12 Thu") and Ending Bankroll, its spend against its plan, its cash post-mortem and scorecards, and the report's path (`<season>-wk12-thu-close.md`) |
 | "carry the bankroll" | `dfs bankroll carry --dry-run`, then `dfs bankroll carry` if a cell changes (add `--slate thu` for the Thanksgiving sheet) | which sheet it read from, each Starting cell before and after |
 
 ## Around the tables

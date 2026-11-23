@@ -78,7 +78,11 @@ def load_real_contests(
     weeks: set[int] | None = None, folder: Path = retro.STANDINGS_DIR
 ) -> list[RealContest]:
     """Every Classic paid contest in the standings folder that the history log has a row for (optionally only
-    `weeks`), parsed once, with its field features."""
+    `weeks`), parsed once, with its field features. A secondary slate reads its own standings folder
+    (`slate.data_path`); the contest log is the account's one record."""
+    from dfs import slate
+
+    folder = slate.data_path(folder)
     log = history.typed(history.read_log("data/contests/contest_log.csv"))
     log = log[log["season"] == SEASON].drop_duplicates("contest_key").set_index("contest_key")
     frames: dict[int, pd.DataFrame | None] = {}

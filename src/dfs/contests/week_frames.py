@@ -44,9 +44,49 @@ def sunday_of(season: int, week: int) -> date:
 
 
 def lock_utc(season: int, week: int) -> datetime:
-    """Sunday 1:00 pm ET of the week, in UTC."""
+    """Sunday 1:00 pm ET of the week, in UTC. On a secondary slate (`slate.py`), that slate's lock
+    (`slate_lock_utc`)."""
+    from dfs import slate
+
+    if not slate.is_main():
+        return slate_lock_utc(season, week, slate.current())
     sunday = sunday_of(season, week)
     return datetime(sunday.year, sunday.month, sunday.day, LOCK_HOUR, tzinfo=EASTERN).astimezone(UTC)
+
+
+def slate_lock_utc(season: int, week: int, key: str) -> datetime:
+    """A secondary slate's lock: the first kickoff on its day in the newest of its own DraftKings salary files
+    (`data/slates/<key>/raw/draftkings/`), else noon ET that day (Thanksgiving's first game is 12:30 pm)."""
+    from dfs import paths, slate
+
+    day = slate.slate_date(key, season, week)
+    folder = slate.data_path(paths.RAW_DIR, key) / "draftkings"
+    for snap in reversed(snapshots(folder)):
+        starts = sorted(k for k in _kickoffs(snap.path) if k.date() == day)
+        if starts:
+            return starts[0].replace(tzinfo=EASTERN).astimezone(UTC)
+    return datetime(day.year, day.month, day.day, 12, tzinfo=EASTERN).astimezone(UTC)
+
+
+def _kickoffs(path: Path) -> set[datetime]:
+    """The kickoff times (naive, Eastern) of the games a salary file lists."""
+    try:
+        info = pd.read_csv(path, usecols=["Game Info"], dtype=str)["Game Info"].dropna().unique()
+    except (ValueError, OSError, pd.errors.ParserError):
+        return set()
+    out = set()
+    for text in info:
+        found = _GAME_INFO.match(str(text).strip())
+        if found:
+            out.add(_kickoff(found.group("when")))
+    return out
+
+
+def slate_day(season: int, week: int) -> date:
+    """The day whose games make the week's slate: its Sunday on main, a secondary slate's own day."""
+    from dfs import slate
+
+    return sunday_of(season, week) if slate.is_main() else slate.slate_date(slate.current(), season, week)
 
 
 def snapshots(dk_dir: Path) -> list[Snapshot]:
@@ -74,8 +114,9 @@ def _games_on(path: Path) -> set[date]:
 
 
 def find_snapshot(dk_dir: Path, season: int, week: int) -> Snapshot | None:
-    """The last snapshot before the week's lock whose games are on that week's Sunday."""
-    sunday, lock = sunday_of(season, week), lock_utc(season, week)
+    """The last snapshot before the week's lock whose games are on that week's Sunday (a secondary slate's
+    own day on that slate, `slate_day`)."""
+    sunday, lock = slate_day(season, week), lock_utc(season, week)
     earliest = lock - timedelta(days=SNAPSHOT_LOOKBACK_DAYS)
     for snap in reversed([s for s in snapshots(dk_dir) if earliest <= s.stamp <= lock]):
         if sunday in _games_on(snap.path):
@@ -88,7 +129,11 @@ def _kickoff(when: str) -> datetime:
 
 
 def read_frame(path: Path, season: int, week: int) -> pd.DataFrame:
-    """The main-slate players of one salary file as a `FRAME_COLUMNS` frame."""
+    """The main-slate players of one salary file as a `FRAME_COLUMNS` frame (on a secondary slate, the
+    players whose game is on that slate's day)."""
+    from dfs import slate
+
+    day = None if slate.is_main() else slate_day(season, week)
     raw = pd.read_csv(path, dtype=str)
     rows = []
     for rec in raw.to_dict("records"):
@@ -96,7 +141,10 @@ def read_frame(path: Path, season: int, week: int) -> pd.DataFrame:
         if not found:
             continue
         kickoff = _kickoff(found.group("when"))
-        if kickoff.weekday() != SUNDAY or kickoff.hour not in MAIN_SLATE_HOURS:
+        if day is not None:
+            if kickoff.date() != day:
+                continue
+        elif kickoff.weekday() != SUNDAY or kickoff.hour not in MAIN_SLATE_HOURS:
             continue
         team = str(rec["TeamAbbrev"]).strip().upper()
         away, home = found.group("away").upper(), found.group("home").upper()
@@ -118,7 +166,11 @@ def read_frame(path: Path, season: int, week: int) -> pd.DataFrame:
 
 
 def week_frame(dk_dir: Path, season: int, week: int) -> tuple[pd.DataFrame | None, str]:
-    """`(frame, note)`: the week's frame and the snapshot used, or `(None, why not)`."""
+    """`(frame, note)`: the week's frame and the snapshot used, or `(None, why not)`. On a secondary slate
+    `dk_dir` is read from that slate's folder (`slate.data_path`)."""
+    from dfs import slate
+
+    dk_dir = slate.data_path(dk_dir)
     snap = find_snapshot(dk_dir, season, week)
     if snap is None:
         return None, f"no DraftKings salary snapshot before the Week {week} {season} lock in {dk_dir}"

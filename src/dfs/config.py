@@ -377,6 +377,17 @@ class SlateSheetConfig(BaseModel):
     week: int | None = None
 
 
+class LearningConfig(BaseModel):
+    """`[learning]`: what the fitted models train on. Every slate keeps its own records (`slate.py`); the fits
+    (the cash line offset, the ownership fits, the calls weights, the copies estimate, the calibration) are
+    the main slate's and train on main slates only unless `fit_secondary_slates` is true (Sam, Nov 23: a
+    3-game slate's ownership and cash lines behave differently from a 12-game slate's)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fit_secondary_slates: bool = False
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -399,6 +410,7 @@ class Config(BaseModel):
     # A secondary slate's own sheet, by slate key (`slate.py`): `[slates.thu] sheet_id = "..."`, written by
     # `dfs week new --slate thu <url>`. Never the main slate's `google_sheets.sheet_id`.
     slates: dict[str, SlateSheetConfig] = {}
+    learning: LearningConfig = LearningConfig()
 
     @field_validator("slates")
     @classmethod

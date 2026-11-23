@@ -30,17 +30,29 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 
 - **A second slate in one week** (`slate.py`, `slate_close.py`; Thanksgiving first, `docs/WORKFLOW.md`): a slate key
   (`main`, or a day: `thu`, `fri`, `sat`, ...) chosen by `--slate` or `DFS_SLATE`, read by the CLI entry point
-  (`prompt_missing.PromptingGroup.main`, before the run lock) and held for the whole command (`slate.active`). Only
-  `slate.SLATE_COMMANDS` take it (a test checks the `--slate` options match); every other command refuses a secondary
-  slate before it runs. A secondary slate's sheet is `[slates.<key>] sheet_id` (`config.load_config` hands it out as
+  (`prompt_missing.PromptingGroup.main`, before the run lock) and held for the whole command (`slate.active`). Every
+  command takes it (`prompt_missing.add_slate_option` gives each leaf a `--slate`); `slate.MAIN_ONLY` (`dfs season`,
+  `dfs auth`) refuses a secondary slate before it runs. A secondary slate's sheet is `[slates.<key>] sheet_id` (`config.load_config` hands it out as
   `google_sheets.sheet_id`; `config.load_base_config` is the file as written), and its files are under
   `data/slates/<key>/`, laid out like `data/` (`slate.root` / `slate.path`): `store.current_dir` / `raw_dir` /
   `manifest_file`, `pool_store.pool_dir`, `suggest_state.state_dir`, `entered.record_path`,
   `late_swap_store._store_dir`, `signals_data.signals_dir`, `news_store.changes_path` / `edge_dir`,
   `runlog.runlog_path`, `week_inputs.data_root` (so the page, its pidfile, chats, jobs and edits follow). Main's
   paths are exactly what they were. Its salaries: `sources.dk_salaries.pick_slate_draft_group` (the largest Classic
-  group all on the slate's day, Eastern time). The close: `slate_close` keeps a secondary slate's contests out of
-  Results and its standings out of `data/raw/dk_standings/` (`contests.capture.capture_standings(divert=...)`).
+  group all on the slate's day, Eastern time). The close is a full one on every slate (`cli.week_close`): its
+  records are its own (`slate.data_path`: `data/X` -> `data/slates/<key>/X`, main's unchanged) and tagged
+  (`slate.SLATE_COLUMN` = `SlateKey`, `slate.tag` / `stamp` / `columns`; `slate.of` / `own_rows` read it back);
+  its standings are kept apart (`slate_close.standings_dir`, `contests.capture.capture_standings(divert=...)`);
+  the contest log is tagged by ledger (`slate_close.tag_log`, read by `slate_chain.log_for_slate` and
+  `slate_close.own_log`); its scoring is its own day's (`results_loop.slate_rows` / `slate_complete`,
+  `results_update.slate_week` / `slate_view`); its DraftKings week and lock are its day's
+  (`contests.week_frames.slate_lock_utc` / `slate_day`); its research report is `<season>-wkNN-<key>-close.md`
+  (`close_research.report_path`, the weekly set only). The fits: `slate.fit_keys` / `read_keys` /
+  `may_save_fit` under `[learning] fit_secondary_slates` (`config.LearningConfig`); `results_update.load_all_scored`
+  reads every key in `read_keys`; `cli._fit_skipped` gates the close's refits; `week_inputs.gather` reads the
+  fitted models from main's `data/model_cache/`. Results rows by label: `results_rows` (`label_rows`, `span`,
+  `ensure_row`, `copy_row`, `copy_rows`), used by `results_autofill`, `contests_cash_line`, `week new` and
+  `cli._refresh_results_row`.
   Its money (`slate_chain.py` pure, `sheet_bankroll_carry.py` I/O): every slate's sheet is a ledger of its own, in
   date order (`slate_chain.links` from config.toml's sheets and their titles, `previous`, `since_last_main`); an
   entry's ledger is `slate_chain.entry_slate` (`for_slate`, `log_for_slate`); `cli._sync_bankroll_from_csv` books
@@ -48,6 +60,7 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   `sheet_season_view.label_rows` / `insert_slate_row`, `season.carry_season` for `week new`); `dfs bankroll carry`
   and the close's `cli._carry_before_close` set Starting Bankroll from the previous slate's Ending.
   Tests: `tests/test_slate.py`, `tests/test_slate_close.py`, `tests/test_slate_money.py`,
+  `tests/test_slate_learning.py`, `tests/test_results_rows.py`,
   `tests/sources/test_dk_salaries_slates.py`.
 
 ## Sync, sources and the news log

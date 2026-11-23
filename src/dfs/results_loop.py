@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from dfs import nfl_calendar, store
+from dfs import nfl_calendar, slate, store
 from dfs.derived import _rosterable_pool_mask, build_edge_frame
 from dfs.kickoff import KICKOFF_TIMEZONE, kickoff_utc
 from dfs.line_movement import LineMovementError, diff_odds
@@ -80,14 +80,19 @@ SCORED_COLUMNS = [
 STATUS_SCORED, STATUS_DNP, STATUS_UNMATCHED = "scored", "dnp", "unmatched"
 
 
+def results_dir(key: str | None = None) -> Path:
+    """`data/results/`, or a secondary slate's own (`data/slates/thu/results/`, `slate.data_path`)."""
+    return slate.data_path(RESULTS_DIR, key)
+
+
 def scored_path(season: int, week: int) -> Path:
     """`data/results/scored_<season>_wNN.csv`: one row per main-slate player for that week."""
-    return RESULTS_DIR / f"scored_{season}_w{week:02d}.csv"
+    return results_dir() / f"scored_{season}_w{week:02d}.csv"
 
 
 def unmatched_path(season: int, week: int) -> Path:
     """`data/results/unmatched_<season>_wNN.csv`: players with a projection that were found nowhere."""
-    return RESULTS_DIR / f"unmatched_{season}_w{week:02d}.csv"
+    return results_dir() / f"unmatched_{season}_w{week:02d}.csv"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -97,7 +102,7 @@ def unmatched_path(season: int, week: int) -> Path:
 
 def snapshot_files(source: str) -> list[tuple[datetime, Path]]:
     """Every `data/raw/<source>/<UTC stamp>.csv`, oldest first."""
-    directory = RAW_DIR / source
+    directory = slate.data_path(RAW_DIR) / source
     if not directory.exists():
         return []
     out = []
@@ -473,7 +478,9 @@ def score_week(
     """Everything for one week. `offense_actual`/`dst_actual` are the full-season outputs of
     `results_actual.score_offense_actual`/`score_dst_actual`. None when the week has no usable
     projection snapshot or DraftKings file."""
-    selected = select_projection_rows(projection_snapshots, week, season)
+    selected = slate_rows(
+        select_projection_rows(projection_snapshots, week, season), slate.current(), season, week
+    )
     reference = reference_time(selected)
     if reference is None:
         log.warning("week %s: no projection snapshot before kickoff", week)
@@ -542,6 +549,26 @@ def coverage(scored: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def slate_complete(game_scores: pd.DataFrame, key: str, season: int, week: int) -> bool:
+    """A secondary slate's week is complete for it when every game on the slate's day has a final score (the
+    rest of the NFL week may still be to play: Thanksgiving is scored on Friday)."""
+    day = slate.slate_date(key, season, week)
+    scores = game_scores.copy()
+    dates = pd.to_datetime(scores.get("gameday"), errors="coerce").dt.date
+    games = scores[(pd.to_numeric(scores["week"], errors="coerce") == week) & (dates == day)]
+    return bool(len(games)) and bool(games["home_score"].notna().all() and games["away_score"].notna().all())
+
+
+def slate_rows(selected: pd.DataFrame, key: str, season: int, week: int) -> pd.DataFrame:
+    """A secondary slate's projection rows: the players whose game kicks off on the slate's day (Eastern), so
+    a projections snapshot that also lists the Sunday games scores only the slate's players."""
+    if selected.empty or key == slate.MAIN or "GameStart" not in selected.columns:
+        return selected
+    day = slate.slate_date(key, season, week)
+    local = kickoff_utc(selected["GameStart"]).dt.tz_convert(KICKOFF_TIMEZONE).dt.date
+    return selected[local == day].reset_index(drop=True)
 
 
 def completed_weeks(game_scores: pd.DataFrame) -> list[int]:

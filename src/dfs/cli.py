@@ -4906,7 +4906,19 @@ def week_new(
 
     _carry_results_team_colour_headers(old_client, new_client, results_cfg)
 
-    if results_rows:
+    if results_rows and _results_have_slate_rows(old_client, results_cfg):
+        # A secondary slate's row ("12 Thu") is on the old tab: the new one gets it too, then values by row.
+        from dfs import results_rows as rr
+
+        try:
+            n_rows, done = rr.copy_rows(old_client, new_client, results_cfg)
+        except (SheetsError, rr.ResultsRowError) as e:
+            console.print(f"[red]Could not write {results_cfg.tab!r} on the new sheet:[/red] {e}")
+            raise typer.Exit(code=1) from e
+        for line in done:
+            console.print(f"[green]OK[/green] {escape(line)}")
+        console.print(f"[green]OK[/green] carried {results_cfg.tab!r} forward ({n_rows} rows)")
+    elif results_rows:
         try:
             for col_range, values in extract_results_value_columns(results_rows).items():
                 start, _, end = col_range.partition(":")
@@ -4932,7 +4944,12 @@ def week_new(
             console.print(f"[green]OK[/green] {escape(line)}")
         console.print(f"[green]OK[/green] carried {season_cfg.tab!r} forward ({n_rows} rows)")
         _refresh_chain_rows(
-            cfg, chain, new_client, (resolved_week, slate.MAIN), other_columns=new_season_other
+            cfg,
+            chain,
+            new_client,
+            (resolved_week, slate.MAIN),
+            other_columns=new_season_other,
+            target_id=new_sheet_id,
         )
     elif season_rows:
         try:
@@ -5238,16 +5255,27 @@ def _carry_into_slate_sheet(
 
     results_cfg = cfg.results
     _carry_results_team_colour_headers(results_client, new_client, results_cfg)
+    from dfs import results_rows as rr
+
     try:
-        rows = results_client.read_range(results_cfg.tab, f"A{results_cfg.first_row}:J{results_cfg.last_row}")
-        for col_range, values in extract_results_value_columns(rows).items():
-            start, _, end = col_range.partition(":")
-            new_client.update_range(
-                results_cfg.tab,
-                f"{start}{results_cfg.first_row}:{end or start}{results_cfg.last_row}",
-                values,
+        if _results_have_slate_rows(results_client, results_cfg):
+            for line in rr.copy_rows(results_client, new_client, results_cfg)[1]:
+                console.print(f"[green]OK[/green] {escape(line)}")
+        else:
+            rows = results_client.read_range(
+                results_cfg.tab, f"A{results_cfg.first_row}:J{results_cfg.last_row}"
             )
-    except SheetsError as e:
+            for col_range, values in extract_results_value_columns(rows).items():
+                start, _, end = col_range.partition(":")
+                new_client.update_range(
+                    results_cfg.tab,
+                    f"{start}{results_cfg.first_row}:{end or start}{results_cfg.last_row}",
+                    values,
+                )
+        _, own = rr.ensure_row(new_client, results_cfg, at[0], slate.current())
+        for line in own:
+            console.print(f"[green]OK[/green] {escape(line)}")
+    except (SheetsError, rr.ResultsRowError) as e:
         console.print(f"[red]Could not carry {results_cfg.tab!r}:[/red] {e}")
         raise typer.Exit(code=1) from e
     console.print(f"[green]OK[/green] carried {results_cfg.tab!r} forward from {results_from.title!r}")
@@ -5378,21 +5406,24 @@ def week_close(
     exist. Revisit only if Sam explicitly asks to reconsider that
     tradeoff -- this is his account, his call.
 
-    Every slate is closed on its own sheet (`slate_chain`): `--slate thu` books the entries whose contest
-    falls on that slate's day into its own Bankroll and Season row ("12 Thu"); the main close leaves them
-    out. When the sheet before this one by date is a secondary slate (or this is one), the close first
-    re-reads that sheet's Ending into this sheet's Starting Bankroll (`dfs bankroll carry`).
+    Every slate is a normal slate (Sam, Nov 23), closed on its own sheet (`slate_chain`): `--slate thu`
+    books the entries whose contest falls on that slate's day into its own Bankroll, Season and Results rows
+    ("12 Thu"), and runs every learning step for it, each writing that slate's own records under
+    `data/slates/thu/` with its key (`slate_close`); the main close leaves them out. The refits (the
+    double-up line, the copies estimate) are main's and run on a slate's close only when `[learning]
+    fit_secondary_slates` includes it. When the sheet before this one by date is a secondary slate (or this
+    is one), the close first re-reads that sheet's Ending into this sheet's Starting Bankroll (`dfs bankroll
+    carry`).
     """
     cfg = _load_config_or_exit()
-    if research and slate.is_main():
+    if research:
         console.record = True  # the report quotes what the close printed
         console.export_text(clear=True)
     console.print("[bold]Closing the week[/bold] -- reconciling bankroll from DK contest history.\n")
+    if not slate.is_main():
+        console.print(f"The {slate.label()} slate, on its own sheet: {cfg.google_sheets.sheet_id}\n")
     csv = _resolve_history_csv(cfg, csv)
     _carry_before_close(cfg, week)
-    if not slate.is_main():
-        _close_secondary_slate(cfg, csv, week)
-        return
     _sync_bankroll_from_csv(cfg, csv, week=week, close=True)
     _keep_dk_files_before_scoring(cfg, csv)
     _score_results_after_close(cfg)  # before the contests step: its post-mortem reads the week's scored table
@@ -5401,34 +5432,29 @@ def week_close(
     _contest_plan_after_close(cfg, closed)
     _entered_record_warning(closed)
     _cash_postmortem_after_close(closed)
-    _secondary_slates_after_close(cfg, csv, closed)
+    if slate.is_main():
+        _secondary_slates_after_close(cfg, csv, closed)
     _du_line_after_close(closed)  # before the review: the band's line, measured on the new double-up too
     _plan_k_after_close(cfg, closed)
     if research:
         _research_after_close(cfg, week, monthly=monthly)
 
 
-def _close_secondary_slate(cfg: Config, csv: Path, week: int | None) -> None:
-    """`dfs week close --slate <key>`: the slate's money, booked on its own sheet (its ledger, its Season row,
-    the rows before it re-read), its DK files kept (its standings apart from the main slate's), its spend
-    against its own plan and its page's bankroll and ledger. The learning steps (Results, Model Check, the
-    post-mortem, edge at lock, the scorecards) are the main slate's in this build, and the close says so."""
-    from dfs.nfl_calendar import current_season, current_week
+class _Skipped(Exception):
+    """A step the close leaves out on purpose (said already)."""
 
-    _sync_bankroll_from_csv(cfg, csv, week=week, close=True)
-    _keep_dk_files_before_scoring(cfg, csv)
-    closed = _closed_week(cfg, week)
-    _contest_plan_after_close(cfg, closed)
-    _entered_record_warning(closed)
-    try:
-        _save_bankroll_health(cfg, SheetsClient(cfg.google_sheets), current_season(), current_week())
-    except Exception as e:  # noqa: BLE001 - the close never fails over the Week page
-        console.print(f"[yellow]Bankroll health not read ({escape(str(e))}).[/yellow]")
+
+def _fit_skipped(what: str, command: str) -> bool:
+    """True (and one line saying so) when a refit must not run now: on a secondary slate whose records the
+    fits leave out (`slate.may_save_fit`), the saved model is main's and this slate's close leaves it as it
+    is."""
+    if slate.may_save_fit():
+        return False
     console.print(
-        f"\nThe {slate.label()} slate's money is booked on its own sheet. Its learning steps (Results, "
-        "Model Check, the post-mortem, edge at lock, the scorecards) did not run: they are the main slate's "
-        "in this build."
+        f"\n{what}: not refitted on the {slate.label()} slate's close -- the fit is the main slate's "
+        f"([learning] fit_secondary_slates is off). `{command}` refits it on main slates."
     )
+    return True
 
 
 def _carry_before_close(cfg: Config, week: int | None) -> None:
@@ -5499,7 +5525,7 @@ def _du_line_after_close(closed: int | None) -> None:
     """Refit the double-up line the cash band is shown against (`data/model_cache/du_line.json`) on every
     week with standings, the one just closed included (blueprint Phase A; `du_line_retro.refresh_summary`:
     only weeks not simulated before are simulated, so a close adds about a minute). NEVER fails the close."""
-    if closed is None:
+    if closed is None or _fit_skipped("The double-up line", "dfs research refresh --only du_line"):
         return
     try:
         from dfs.nfl_calendar import current_season
@@ -5527,11 +5553,15 @@ def _plan_k_after_close(cfg: Config, closed: int | None) -> None:
     except Exception as e:  # noqa: BLE001 - the close never fails over the Week page
         console.print(f"[yellow]Bankroll health not read ({escape(str(e))}).[/yellow]")
     try:
+        if _fit_skipped("The copies estimate", "dfs contests dupes"):
+            raise _Skipped
         result = dup_calibration.run([], current_season())
         dup_calibration.save(result)
         console.print(
             f"[green]OK[/green] copies estimate recalibrated on Weeks {', '.join(map(str, result['weeks']))}"
         )
+    except _Skipped:
+        pass
     except Exception as e:  # noqa: BLE001 - the close never fails over a study
         console.print(
             f"[yellow]Copies estimate not recalibrated ({escape(str(e))}); `dfs contests dupes` reruns "
@@ -5567,13 +5597,8 @@ def _research_after_close(cfg: Config, week: int | None, *, monthly: bool = Fals
         season = current_season()
         scored = refresh.latest_scored_week(season)
         client = SheetsClient(cfg.google_sheets)
-        title, _url = client.describe()
-        from dfs.week import parse_week_from_title
-
-        try:
-            closed = week if week is not None else parse_week_from_title(title)
-        except ValueError:
-            closed = scored
+        closed = _closed_week(cfg, week)
+        closed = scored if closed is None else closed
         if closed is None or scored is None or scored < closed:
             console.print(
                 f"[yellow]Week {closed} is not scored yet (nflverse posts stats a day or two late); run "
@@ -5632,6 +5657,12 @@ def _keep_dk_files_before_scoring(cfg: Config, csv: Path) -> None:
         got = capture.capture_standings(
             Path(cfg.contests.downloads_dir).expanduser(), DK_STANDINGS_DIR, divert
         )
+        from dfs.nfl_calendar import current_season
+        from dfs.paths import CONTESTS_DIR
+
+        tagged = slate_close.tag_log(cfg, CONTESTS_DIR / "contest_log.csv", current_season())
+        if tagged:
+            console.print(f"Contest log: {tagged} entr{'y' if tagged == 1 else 'ies'} tagged with its slate.")
         for line in capture.describe(got):
             console.print(escape(line))
     except Exception as e:  # noqa: BLE001 - the bankroll side already succeeded; the contests step retries
@@ -5691,9 +5722,13 @@ def _closed_week(cfg: Config, week: int | None) -> int | None:
         return week
     from dfs.week import parse_week_from_title
 
+    if not slate.is_main():
+        from dfs.results_update import slate_week
+
+        return slate_week(cfg)  # `[slates.<key>] week`, else the slate sheet's title
     try:
         title = SheetsClient(cfg.google_sheets).describe()[0]
-        return parse_week_from_title(title) if slate.is_main() else slate.title_week(title)
+        return parse_week_from_title(title)
     except Exception:  # noqa: BLE001 - the steps that need it say they were skipped
         return None
 
@@ -5753,7 +5788,7 @@ def _contest_plan_after_close(cfg: Config, week: int | None) -> None:
         check = contest_plan.check_week(typed, season, closed, cfg.contest_plan, budget)
         console.print("\n" + escape(check.line()), highlight=False)
         _tier_line_after_close(typed, season, closed, cfg, budget)
-        _h2h_log_after_close(season, closed)
+        _h2h_log_after_close(cfg, season, closed)
         from dfs.nfl_calendar import current_week
 
         _save_ledger(cfg, season, max(current_week(), closed), through=closed, budget=budget)
@@ -5768,14 +5803,15 @@ def _slate_log(cfg: Config, frame, season: int):  # noqa: ANN001, ANN202 - DataF
     from dfs import slate_chain
 
     _, chain = _slate_chain(cfg)
-    if not chain:
+    if not chain and slate.SLATE_COLUMN not in frame.columns and "slate_key" not in frame.columns:
         return frame
     return slate_chain.log_for_slate(frame, slate.current(), season, slate_chain.slate_weeks(chain))
 
 
-def _h2h_log_after_close(season: int, closed: int) -> None:
+def _h2h_log_after_close(cfg: Config, season: int, closed: int) -> None:
     """Append the closed week's H2H games to `data/contests/h2h_log.csv` (blueprint 13.2 item 5; it holds
-    opponent names, stays in data/ and nothing prints it). Fail-soft."""
+    opponent names, stays in data/ and nothing prints it): this slate's own games, in its own file
+    (`slate.data_path`). Fail-soft."""
     try:
         from dfs import entered, h2h_log
         from dfs.contests import history
@@ -5783,8 +5819,8 @@ def _h2h_log_after_close(season: int, closed: int) -> None:
 
         rec = entered.load(season, closed)
         n = h2h_log.append(
-            CONTESTS_DIR / "h2h_log.csv",
-            history.read_log(CONTESTS_DIR / "contest_log.csv"),
+            slate.data_path(CONTESTS_DIR) / "h2h_log.csv",
+            _slate_log(cfg, history.read_log(CONTESTS_DIR / "contest_log.csv"), season),
             season=season,
             week=closed,
             posted_or_joined=rec.h2h if rec is not None else "",
@@ -5804,7 +5840,7 @@ def _tier_line_after_close(typed, season: int, closed: int, cfg: Config, budget:
     from dfs.nfl_calendar import current_week
     from dfs.paths import CONTESTS_DIR
 
-    path = CONTESTS_DIR / "h2h_opponents.csv"
+    path = slate.data_path(CONTESTS_DIR) / "h2h_opponents.csv"
     opponents = pd.read_csv(path) if path.exists() else None
     spend = contest_plan.check_week_tiers(typed, season, closed, cfg.contest_plan, budget, opponents)
     if spend is None:
@@ -6135,6 +6171,61 @@ def ownership_log(
     )
 
 
+def _results_have_slate_rows(client: SheetsClient, rc) -> bool:  # noqa: ANN001 - ResultsConfig
+    from dfs import results_rows
+
+    try:
+        return results_rows.has_slate_rows(client, rc)
+    except SheetsError:
+        return False
+
+
+def _refresh_results_row(cfg: Config, source: SheetsClient, target: SheetsClient, link) -> None:  # noqa: ANN001
+    """A secondary slate's Results row ("12 Thu") copied from its own sheet onto `target`, inserted there in
+    date order when missing (`results_rows.copy_row`). Reads the slate's sheet, never writes it. Never fails
+    the caller."""
+    from dfs import results_rows
+
+    try:
+        _, done = results_rows.copy_row(source, target, cfg.results, link.week, link.key)
+    except (SheetsError, results_rows.ResultsRowError) as e:
+        console.print(
+            f"[yellow]{cfg.results.tab}: {link.label!r} not re-read from {link.title!r} ({e}).[/yellow]"
+        )
+        return
+    for line in done:
+        console.print(f"[green]OK[/green] {escape(line)}")
+    console.print(f"[green]OK[/green] {cfg.results.tab!r} {link.label!r} re-read from {link.title!r}")
+
+
+def _write_slate_results_row(cfg: Config, client: SheetsClient, entries: list, key: str, week: int) -> None:
+    """A secondary slate's Results row ("12 Thu"): inserted in date order when the tab has none, then Cash Pts
+    and H2H Entered / Win from the slate's own entries (`results_autofill.compute_week_results`). Stops the
+    command on a failed write, as main's Results write does."""
+    from dfs import results_rows
+    from dfs.slate_chain import season_label
+
+    by_week = compute_week_results(entries, nfl_calendar.current_season())
+    stats = next(iter(by_week.values()), None) if by_week else None
+    label = season_label(week, key)
+    try:
+        row, done = results_rows.ensure_row(client, cfg.results, week, key)
+        for line in done:
+            console.print(f"[green]OK[/green] {escape(line)}")
+        if stats is not None:
+            results_rows.write_row(client, cfg.results, row, stats)
+    except (SheetsError, results_rows.ResultsRowError) as e:
+        console.print(f"[red]Could not write {cfg.results.tab!r} {label!r}:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    if stats is None:
+        console.print(f"{cfg.results.tab!r} {label!r}: no scored entry of this slate yet.")
+    else:
+        console.print(
+            f"\n[green]OK[/green] updated {cfg.results.tab!r} {label!r}: Cash Pts "
+            f"{'-' if stats.cash_pts is None else stats.cash_pts}, H2H {stats.h2h_win} of {stats.h2h_entered}"
+        )
+
+
 def _refresh_closed_week_row(
     cfg: Config,
     closed: SheetsClient,
@@ -6250,15 +6341,18 @@ def _refresh_chain_rows(
     for link in slate_chain.since_last_main(chain, slate_chain.position(*at)):
         if link.sheet_id == me:
             continue
+        source = _client_for(cfg, link.sheet_id)
         _refresh_closed_week_row(
             cfg,
-            _client_for(cfg, link.sheet_id),
+            source,
             target,
             old_title=link.title,
             other_columns=other_columns,
             week=link.week,
             key=link.key,
         )
+        if not link.is_main:  # a slate's Results row is its own sheet's; a main week's is carried by week new
+            _refresh_results_row(cfg, source, target, link)
 
 
 def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None, close: bool = False) -> None:
@@ -6425,8 +6519,8 @@ def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None, 
     # week's worth. A season-long export backfills every past week it
     # has real data for in one pass; Cash Line and the team-colour
     # columns are never touched (see results_autofill.write_results_updates).
-    # Results is the main slate's record: a secondary slate's entries this week (Thanksgiving's double-ups and
-    # H2Hs) are booked in the Bankroll ledger above, never in Cash Pts / H2H here (`slate_close`).
+    # Results is each slate's own record: the main slate's weeks by number, a secondary slate's in its own row
+    # ("12 Thu", inserted in date order on its sheet; `results_rows`), each from its own entries only.
     from dfs import slate_close
 
     if key == slate.MAIN:
@@ -6443,10 +6537,7 @@ def _sync_bankroll_from_csv(cfg: Config, csv: Path, *, week: int | None = None, 
             weeks_str = ", ".join(str(w) for w in written_weeks)
             console.print(f"\n[green]OK[/green] updated {cfg.results.tab!r} for week(s): {weeks_str}")
     else:
-        console.print(
-            f"\n{cfg.results.tab!r} not written: it is the main slate's record (the slate's own rows come "
-            "with its learning side)."
-        )
+        _write_slate_results_row(cfg, client, ledger_entries, key, resolved_week)
 
     # Round 5, item 7d (revised 2026-09-29): Season follows the LEDGER. This
     # week's Cash/GPP/Other net and cost come from the Bankroll tab's own weekly

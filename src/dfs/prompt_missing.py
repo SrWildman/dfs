@@ -121,8 +121,8 @@ def _run_lock_for(root: Any, argv: list[str]):
 
 def _slate_for(root: Any, argv: list[str]):
     """The slate the command works on (`slate.py`: `--slate`, else `DFS_SLATE`, else main), held for the whole
-    command. A command that is not built for a secondary slate refuses one here, before it runs: a printed
-    reason and exit code 1 (the default deny that keeps the main slate's records clean)."""
+    command. Every command takes one except the season-long and login commands (`slate.MAIN_ONLY`), which
+    refuse a secondary slate here, before they run: a printed reason and exit code 1."""
     from contextlib import contextmanager
 
     from dfs import slate
@@ -149,9 +149,43 @@ def _slate_for(root: Any, argv: list[str]):
     return held()
 
 
+MAIN_ONLY_GROUPS = ("season", "auth")  # `slate.MAIN_ONLY`'s groups: their commands get no --slate
+
+
+def add_slate_option(command: Any) -> None:
+    """Give a leaf command the `--slate` option when it has none of its own (`slate.py`: every command takes
+    one). The entry point reads the value before the command runs (`_slate_for`), so the option only has to
+    be accepted and listed in --help; it is not passed to the function."""
+    from typer.core import TyperOption
+
+    from dfs import slate
+
+    if any("--slate" in getattr(p, "opts", ()) for p in command.params):
+        return
+    command.params.append(
+        TyperOption(
+            param_decls=["--slate"],
+            type=str,
+            default=slate.MAIN,
+            expose_value=False,
+            show_default=True,
+            help=slate.SLATE_HELP,
+        )
+    )
+
+
 class PromptingGroup(TyperGroup):
     """A Typer group whose leaf commands ask for missing required parameters (see module docstring). The
-    top-level one is also the entry point that writes the run log (`runlog.py`)."""
+    top-level one is also the entry point that writes the run log (`runlog.py`). Every leaf command under it
+    takes `--slate` (`add_slate_option`), except under the season-long and login groups."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if self.name in MAIN_ONLY_GROUPS:
+            return
+        for command in self.commands.values():
+            if not hasattr(command, "commands"):
+                add_slate_option(command)
 
     def main(self, *args: Any, **kwargs: Any):
         argv = kwargs["args"] if "args" in kwargs else (args[0] if args else None)

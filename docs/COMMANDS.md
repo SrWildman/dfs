@@ -136,6 +136,7 @@ Rank every QB's stacks of one and two teammates (with and without a bring-back) 
 | `--no-sheet` | Print the ranking; write nothing. |
 | `--refit` | Refit the field model on the real standings first, and save it (about two minutes). |
 | `--retro` | Refit, then rerun the retro on the weeks with standings and save the track record the tab shows (several minutes). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs plays`
 
@@ -149,6 +150,7 @@ The plays model's calls (SHADOW, Plan M): for every rosterable player a cash cal
 | `--season INT` | Override the auto-detected NFL season. |
 | `--no-save` | Print the calls; do not add a version to this week's record. |
 | `--inactives` | The Sunday inactives check: run `dfs sync --live` first (it recomputes the calls and refreshes the Cockpit tab where the sheet has one), then print the calls and what moved up. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs entries fill`
 
@@ -235,6 +237,7 @@ Score every completed week that is not scored yet against nflverse's actual stat
 | `--all` | Rescore every completed week (flags are recomputed with today's code). |
 | `--sheet-id STR` | Write Model Check to this sheet instead of config.toml's (e.g. the template). |
 | `--no-sheet` | Score to data/results/ only; do not touch the sheet. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs pool add`
 
@@ -278,10 +281,15 @@ Diff the two most recent nfl_odds syncs and show which teams' lines moved the mo
 | Option | What it does |
 |---|---|
 | `--top / -n INT` | Number of biggest moves to show. Default: `10`. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs odds snapshot`
 
 Save the current betting lines (and nothing else): no sheet, no other source. Line movement for the week is measured against the week's opening lines, and the odds source only shows the current slate, so the opening is on record only if the lines were saved before the sheet was copied: run this early in the week (Monday or Tuesday morning), before `dfs week new`.
+
+| Option | What it does |
+|---|---|
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ## Reference: bankroll, logs and accounts (only when needed)
 
@@ -315,6 +323,7 @@ Rebuild the STAKES block on the Bankroll tab: your own ROI, cash rate and weekly
 | `--propose` | Print values for max_pct_bankroll_per_week and max_entry_fee_pct worked out from your own bankroll and weekly volatility, with the arithmetic. Read-only: nothing is written anywhere. |
 | `--no-sheet` | Print the plan; do not write the STAKES block to the sheet. |
 | `--sheet-id STR` | Read and write this sheet instead of config.toml's (e.g. the template: template first, then the live sheet). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs contests update`
 
@@ -325,6 +334,7 @@ The contest side of `dfs week close`, on its own: keeps the history export and m
 | `--csv PATH` | A DraftKings contest-history export. Left out, the newest one in your Downloads folder ([contests] downloads_dir) is used, found by its header row. |
 | `--sheet-id STR` | Write the Contests tab to this sheet instead of config.toml's (the template first). Results' Cash Line is only ever filled on config.toml's own sheet. |
 | `--no-sheet` | Keep the files and run the engine; touch no sheet. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs contests plan`
 
@@ -335,6 +345,7 @@ The weekly contest plan and what last week spent, from your own contest log (Pla
 | `--week INT` | Check this week against the plan (default: the last one played). |
 | `--budget FLOAT` | The weekly budget to plan with (default: the Bankroll tab's Weekly Budget). |
 | `--no-sheet` | Read no sheet (the plan then has no total cap). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs contests analyze`
 
@@ -349,6 +360,7 @@ Merges your DraftKings history into a durable log, tags every contest with its s
 | `--players PATH` | CSV of players: Name, Team, Position, Opponent and optionally Salary (EdgeRaw has them), with Season and Week columns to cover several weeks. Without it each week's players come from the last DraftKings salary snapshot before that week's lock (data/raw/draftkings). |
 | `--slate-index STR` | Which slate-scoring index is shown beside each week's fitted effect, and is the 'index' comparator: top_n_lineup, p95_optimal, points_per_game, or 'none' to leave it out. Default: `top_n_lineup`. |
 | `--slate-index-file PATH` | A season,week,index CSV to use instead of computing the index. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs contests dupes`
 
@@ -358,6 +370,7 @@ Calibrate the expected-copies estimate on your own saved standings (Plan K item 
 |---|---|
 | `--weeks STR` | Comma-separated weeks to calibrate on (default: every week with saved standings). |
 | `--dry-run` | Print the fit and its error; save nothing. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs week review`
 
@@ -367,6 +380,7 @@ Review a closed week from its saved standings and builds, for the Week page (Pla
 |---|---|
 | `--week INT` | The closed week to review (default: the contest log's newest week). |
 | `--only STR` | Run only these parts, comma-separated: field_review, scorecard, exposure, numbers, edge_at_lock, close (e.g. --only edge_at_lock,close to backfill the Close view of a past week). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs ownership log`
 
@@ -378,6 +392,7 @@ Logs one contest's actual per-player ownership into the durable local ownership 
 | `--contest-id STR` | Defaults to the CSV filename's own contest ID (DK names these contest-standings-<id>.csv) -- pass this only if the file's been renamed. |
 | `--week INT` | Defaults to the current NFL week. |
 | `--season INT` | Defaults to the current season. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs news changes`
 
@@ -389,10 +404,15 @@ Print a week's rows from the news change log, oldest first: when each change was
 | `--season INT` | The season (default: the current one). |
 | `--field STR` | Which fields, comma-separated: status, proj_tffb, proj_sleeper, proj_fantasypros, proj_espn, proj_props, proj_agg, calpts, own_tffb, cash_own, gpp_own, spread, total, or all. Default: `status`. |
 | `--player STR` | Only names containing this text. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs news backfill`
 
 Rebuild the news change log (`data/news/changes.csv`) from every saved EdgeRaw snapshot (`data/raw/edge/`): each snapshot against the one before it, one row per changed field. Append-only and safe to run twice: a snapshot already in the log is skipped, so a second run adds nothing. `dfs sync`, `dfs sync --live` and `dfs lineups late-swap --refresh-injuries` keep the log current by themselves; run this once to load the season so far, or after a sync warned that the log was not updated. Reads and writes files only: no sheet.
+
+| Option | What it does |
+|---|---|
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs lineups clear`
 
@@ -419,6 +439,7 @@ Round 5, item 7a: insert the hand-entered Betting ledger above the Cash ledger (
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Build on a different sheet instead of config.toml's -- template first, then live, per the two-sheet rule. This is a one-time structural build, not a per-week command. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ## Reference: season-long leagues and the Season sheet (only when needed)
 
@@ -558,6 +579,7 @@ Rebuild models/sim/correlations.csv (and the QB1-TE1 team-shape table beside it)
 | `--seed INT` | Seed for every random draw. |
 | `--out-dir PATH` | Where to write (default: models/sim/). |
 | `--through INT` | Last season to fit on. Default: the shipped model's last complete season; the current season (`dfs model fetch` first) adds the weeks played so far. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs sim backtest`
 
@@ -572,6 +594,7 @@ Back-test on 2023-2025: random legal lineups, correlations fitted on 2014-2022 o
 | `--save` | Also write the report to models/sim/backtest.md. |
 | `--results PATH` | Also write the per-lineup results (parquet). |
 | `--from-results PATH` | Print the report for saved per-lineup results instead of re-simulating. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs sim script`
 
@@ -588,6 +611,7 @@ Game script: does a pair's correlation depend on the spread or the team's implie
 | `--results PATH` | Also write the per-lineup results (parquet). |
 | `--from-results PATH` | Use saved per-lineup results instead of re-simulating them. |
 | `--keep PATH` | Also pickle the whole analysis, to re-render the report without refitting. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs sim demo`
 
@@ -597,6 +621,7 @@ Two lineups from 2025 week 12 -- one stacked around Patrick Mahomes, one not -- 
 |---|---|
 | `--cash-line FLOAT` | Cash line in points (default 145). |
 | `--gpp-target FLOAT` | GPP target in points (default 190). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ## Reference: the UM model and the research pack (only when needed)
 
@@ -609,6 +634,7 @@ Download or refresh the public nflverse / ffopportunity history into data/model_
 | Option | What it does |
 |---|---|
 | `--refresh-all` | Re-download completed seasons too (they never change). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs model train`
 
@@ -618,6 +644,7 @@ Rebuild the artifacts: holdout comparison, shipping decision, shipped models, di
 |---|---|
 | `--through INT` | Last season to train on (default: the last complete season in the cache). |
 | `--out-dir PATH` | Where to write artifacts (default: models/um/). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs model backtest`
 
@@ -626,10 +653,15 @@ Print the holdout and calibration tables. By default this recomputes them from t
 | Option | What it does |
 |---|---|
 | `--saved` | Print the shipped backtest.md instead of recomputing. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs model info`
 
 Show the shipped artifacts: version, training seasons, chosen method per position, holdout metrics and the scikit-learn version they were built with (flagging a mismatch).
+
+| Option | What it does |
+|---|---|
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs research fetch`
 
@@ -638,6 +670,7 @@ Download the 2014-2025 public history the studies read (player and team stats, f
 | Option | What it does |
 |---|---|
 | `--refresh` | Re-download seasons already cached. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs research run`
 
@@ -646,6 +679,7 @@ Rebuild the study outputs under models/research/ from the cache (no network).
 | Option | What it does |
 |---|---|
 | `--study STR` | r1, r2, r3, r4, r5, r6 or all. Default: `all`. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs research refresh`
 
@@ -656,6 +690,7 @@ Rerun the weekly offline studies with the closed weeks so far and write one repo
 | `--through INT` | Last closed week to include (default: the newest scored week). |
 | `--season INT` | Override the auto-detected NFL season. |
 | `--only STR` | Comma-separated studies to run: bump, ownership, shadows, contest_retro, curse, du_line; backtest (the Flashback backtest, about 6 minutes) runs only when named here. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs research close-report`
 
@@ -668,6 +703,7 @@ Monday's offline studies and their one report, on their own (`dfs week close --r
 | `--only STR` | Comma-separated stages: scorecards, refresh, stacks, calls, calls_flashback (default: the scorecards, plus the other four on the first close of a month or with --monthly). |
 | `--monthly` | Also run the monthly studies (refresh, stacks, calls, calls_flashback). |
 | `--deadline FLOAT` | Minutes after which a stage still running is stopped. Default: `45.0`. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs backtest`
 
@@ -681,6 +717,7 @@ Would these build settings have made money? Rebuilds each week with today's code
 | `--fresh` | Rebuild even where a saved run of the same code exists. |
 | `--workers INT RANGE` | Weeks built in parallel. Default: `6`. |
 | `--no-report` | Print the summary; write no report file. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ## Reference: building and styling a sheet (only when needed)
 
@@ -693,6 +730,7 @@ Run the full one-time sheet build, in the order that actually works, instead of 
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Build a different sheet instead of config.toml's -- e.g. the canonical weekly template, so new weekly copies inherit everything below. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup polish`
 
@@ -702,6 +740,7 @@ Mostly presentation: widths, freeze panes, number formats, header treatment, Fla
 |---|---|
 | `--sheet-id STR` | Style a different sheet instead of config.toml's -- e.g. the canonical weekly template, so new copies are already styled. |
 | `--skip-chrome` | Leave the tab strip alone (no reorder, recolour or hiding). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup build-views`
 
@@ -710,6 +749,7 @@ Create (or rebuild) the four derived, read-only tabs: Board, Slate Grid, Exposur
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Build the view tabs in a different sheet instead of config.toml's. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup instructions`
 
@@ -718,6 +758,7 @@ Rewrites every row of the Instructions tab from `sheet_instructions.py` -- see t
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Regenerate Instructions on a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup link-edge`
 
@@ -727,6 +768,7 @@ Fill in EdgeRaw's derived columns (Leverage, Flags, etc.) on Player Pool, Lineup
 |---|---|
 | `--sheet-id STR` | Link a different sheet instead of config.toml's -- e.g. the canonical weekly template, so new copies already have EdgeRaw's columns linked in. |
 | `--force` | Refresh every linked column's formula even where the tab is already fully linked -- needed after `edge_lookup_formula`'s own generation logic changes (not a position change), since the normal 'something's missing' trigger never fires on an already-linked tab. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup reorder-columns`
 
@@ -735,6 +777,7 @@ Phase 3/6, one-time: moves PlayerPoolRaw, Player Pool and Lineups into `sheet_co
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Reorder a different sheet instead of config.toml's -- ALWAYS run against the canonical template first, verify with `dfs doctor`, then run again against the live sheet. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup add-pool-control`
 
@@ -743,6 +786,7 @@ A3: create (or refresh) Player Pool's own "add a player" row -- a type dropdown 
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Add/refresh the control row on a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup dk-upload`
 
@@ -751,6 +795,7 @@ Put the entries layout on the DK Upload tab: DK's columns, then Format, a typed 
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup cockpit`
 
@@ -759,6 +804,7 @@ Create the `Cockpit` tab right before Board (to its left), or rebuild it. One re
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup stacks`
 
@@ -767,6 +813,7 @@ Create the `Stacks` tab right after Suggested, or rebuild it: the top 20 QB stac
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Build it on a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup add-filters`
 
@@ -775,6 +822,7 @@ Fix 1: sorting and searching are real features that were invisible -- filter vie
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Add filters to a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup protect`
 
@@ -783,6 +831,7 @@ Warning-only protection (never a hard lock) on every fully formula-driven tab --
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Protect a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup suggested-controls`
 
@@ -791,6 +840,7 @@ Make the Suggested tab ready to iterate on (`dfs lineups suggest --iterate`). Sa
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Set up a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup audit-style`
 
@@ -799,6 +849,7 @@ Read-only style check: per tab, the header row carries the shared dark fill, a f
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Audit a different sheet instead of config.toml's -- e.g. right after `dfs sheets polish`, to confirm what actually landed. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup build-season`
 
@@ -807,10 +858,15 @@ Round 5, item 7d: creates (or completely rewrites) the Season tab -- one pre-bui
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Build on a different sheet instead of config.toml's -- template first, then live, per the two-sheet rule. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup inspect`
 
 List every tab in the connected sheet, with dimensions and header row.
+
+| Option | What it does |
+|---|---|
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ## Reference: one-time repairs and migrations (only when needed)
 
@@ -823,6 +879,7 @@ Round 5 follow-up item 2 (2026-09-29): `dfs doctor` now requires a formula on ev
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Repair a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup native-lookups`
 
@@ -832,6 +889,7 @@ Rewrite Player Pool's and Lineups' native PlayerPoolRaw lookups (Team, DK Sal, P
 |---|---|
 | `--sheet-id STR` | Fix a different sheet -- template first, then live. |
 | `--all` | Rewrite every native lookup, stale or not. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup lineup-chalk`
 
@@ -840,6 +898,7 @@ Rewrites Lineups' Issues formulas and chips (the same step `dfs setup polish` ru
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Apply to a different sheet instead of config.toml's -- the template first. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup guard-empty-states`
 
@@ -848,6 +907,7 @@ Round 5 cleanup item 2 (2026-09-29). Wraps the divisions and averages on Results
 | Option | What it does |
 |---|---|
 | `--sheet-id STR` | Apply to a different sheet instead of config.toml's -- e.g. the canonical weekly template. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs setup other-sports`
 
@@ -859,6 +919,7 @@ Plan D item 2 (Sam, 2026-11-03: "own category, but it's the same total bankroll"
 | `--history` | Also split the Season rows already written (non-NFL money out of GPP into Other, from the kept DK history export) and re-read last week's row from its own Bankroll. The live week only, never the template. |
 | `--csv PATH` | The DK contest-history export for --history (default: the newest kept one). |
 | `--dry-run` | Print what would change; write nothing. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ## Data sources
 

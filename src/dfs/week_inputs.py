@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from dfs import paths, runlog
+from dfs import paths, runlog, slate
 
 INPUTS_SUBDIR = Path("week") / "inputs"
 
@@ -236,12 +236,18 @@ class LastWeek:
 
 def last_week(data_dir: Path, season: int) -> LastWeek | None:
     """The newest week of `season` in the contest log (NFL, paid entries), by format, and the cash entries'
-    margin to the line from `decisions.csv`. Net = cash winnings minus the entry fee."""
-    log = _read_csv(data_dir / "contests" / "contest_log.csv")
+    margin to the line from `decisions.csv`. Net = cash winnings minus the entry fee. A secondary slate's page
+    reads the account's one log and its own entries in it (`SlateKey`); main's leaves a slate's out."""
+    log_file = data_dir / "contests" / "contest_log.csv"
+    if not log_file.exists():
+        log_file = paths.DATA_DIR / "contests" / "contest_log.csv"  # a slate's folder has no log of its own
+    log = _read_csv(log_file)
+    here = slate.current()
     rows = [
         r
         for r in log
-        if _int(r.get("Season")) == season
+        if ((r.get(slate.SLATE_COLUMN) or "").strip() or slate.MAIN) == here
+        and _int(r.get("Season")) == season
         and r.get("Sport", "NFL") == "NFL"
         and money(r.get("Entry_Fee")) > 0
     ]
@@ -515,6 +521,7 @@ def load_decisions(data_dir: Path, season: int, week: int) -> list[dict] | None:
 def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) -> WeekInputs:
     """Read every saved output for the week. Pure reading: a missing file is a None, never an error."""
     d = data_dir or data_root()
+    models = d if data_dir is not None else paths.DATA_DIR  # the fitted models are main's, on every slate
     edge = load_edge(d)
     prev = load_prev_edge(d, edge)
     signal_table, scored_weeks = load_signal_table(d, season)
@@ -533,9 +540,9 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         suggest=latest_round(d, week),
         cash_core=load_input("cash_core", season, week, d),
         stacks=load_input("stacks", season, week, d),
-        stacks_retro=read_json(d / "model_cache" / "stacks_retro.json"),
+        stacks_retro=read_json(models / "model_cache" / "stacks_retro.json"),
         late_swap=read_json(d / "cockpit" / "late_swap.json"),
-        du_line=read_json(d / "model_cache" / "du_line.json"),
+        du_line=read_json(models / "model_cache" / "du_line.json"),
         contest_plan=load_input("contest_plan", season, week, d),
         ledger=load_input("ledger", season, week, d),
         # `week close` writes the closing week's post-mortem: Monday it is this week's, Tuesday on last week's
@@ -550,7 +557,7 @@ def gather(season: int, week: int, now: datetime, data_dir: Path | None = None) 
         bankroll=load_input("bankroll", season, week, d),
         practice=_practice(d, season, week, now),
         sheet_lineups=load_input("sheet_lineups", season, week, d),
-        dup_calibration=read_json(d / "model_cache" / "dup_calibration.json"),
+        dup_calibration=read_json(models / "model_cache" / "dup_calibration.json"),
         field_review=_closed("field_review", season, week, d),
         scorecard=_closed("scorecard", season, week, d),
         exposure_close=_closed("exposure_close", season, week, d),

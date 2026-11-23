@@ -34,9 +34,11 @@ NEEDS_STANDINGS = ("field_review", "scorecard", "exposure", "numbers", "edge_at_
 
 
 def _contests_dir() -> Path:
+    """`data/contests/`, or a secondary slate's own (`slate.data_path`): its review records are its own."""
+    from dfs import slate
     from dfs.paths import CONTESTS_DIR
 
-    return CONTESTS_DIR
+    return slate.data_path(CONTESTS_DIR)
 
 
 def _mine(c, me: str) -> list[tuple[str, ...]]:  # noqa: ANN001 - RealContest
@@ -118,10 +120,11 @@ def scorecard_inputs(
     """The four scorecards (`scorecard.scorecards`) and what they were built from: (cards, projection by
     week, ownership scores, the edge-at-lock summary). Files only; runs no builder (about 20 seconds, most
     of it the ownership scoring)."""
-    from dfs import edge_at_lock, field_own, results_update
+    from dfs import edge_at_lock, field_own, results_update, slate
     from dfs.sim import dups
 
-    projection = numbers.projection_by_week(results_update.load_all_scored(season))
+    # each slate's scorecard is its own (Sam, Nov 23): its scored rows only
+    projection = numbers.projection_by_week(slate.own_rows(results_update.load_all_scored(season)))
     try:
         own_frame, _counts = field_own.training_frame(season, through=week)
         own = field_own.score_weeks(own_frame, curve=dups.double_up_ownership).to_dict("records")
@@ -138,12 +141,11 @@ def scorecard_inputs(
 
 def close_input(season: int, week: int, *, edge_summary: dict | None, say: Callable[[str], None]) -> dict:
     """The `close` input (`close_view.payload`) from the files the close leaves. Each piece fails soft."""
-    from dfs import cash_postmortem, close_view, entered, ledger
-    from dfs.contests import history
+    from dfs import cash_postmortem, close_view, entered, ledger, slate_close
 
     contests_dir = _contests_dir()
     decisions = _csv_rows(contests_dir / "decisions.csv")
-    frame = ledger.load(history.read_log(contests_dir / "contest_log.csv"), through=(season, week))
+    frame = ledger.load(slate_close.own_log(season), through=(season, week))
     week_rows = frame[(frame["Season"] == season) & (frame["Week"] == week)]
     net, by_group = close_view.money(week_rows[["group", "net"]].to_dict("records"))
     fun = frame[(frame["Season"] == season) & (frame["group"] == ledger.FUN)]
@@ -295,7 +297,7 @@ def run(
 
     def do_numbers() -> None:
         from dfs import cash_postmortem, results_update
-        from dfs.results_loop import RESULTS_DIR
+        from dfs.results_loop import results_dir
 
         cash_path = _contests_dir() / "cash_shown.csv"
         try:
@@ -319,7 +321,7 @@ def run(
         body = numbers.payload(
             results_update.load_all_scored(season),
             numbers.read_csv(cash_path),
-            numbers.read_csv(RESULTS_DIR / f"signal_table_{season}.csv"),
+            numbers.read_csv(results_dir() / f"signal_table_{season}.csv"),
         )
         body["week"] = week
         week_inputs.save_input("numbers", body, season=season, week=week)

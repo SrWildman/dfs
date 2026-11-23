@@ -30,6 +30,7 @@ from dfs import (
     results_loop,
     results_signals,
     signals_data,
+    slate,
     teammate_bump,
 )
 from dfs.config import Config
@@ -75,10 +76,14 @@ def load_projection_snapshots() -> list[tuple]:
 
 
 def load_all_scored(season: int) -> pd.DataFrame:
-    """Concatenate every `scored_<season>_wNN.csv` on disk (empty frame if none)."""
+    """Concatenate every `scored_<season>_wNN.csv` on disk (empty frame if none): main's, plus a secondary
+    slate's own while it is active and every slate the fits include (`slate.read_keys`; main alone with no
+    `[learning]` switch, exactly as before). A slate's rows carry `SlateKey`; a player plays once a week, so
+    they never repeat a main row of the same week."""
     frames = []
-    for path in sorted(results_loop.RESULTS_DIR.glob(f"scored_{season}_w*.csv")):
-        frames.append(pd.read_csv(path))
+    for key in slate.read_keys():
+        for path in sorted(results_loop.results_dir(key).glob(f"scored_{season}_w*.csv")):
+            frames.append(pd.read_csv(path))
     if not frames:
         return pd.DataFrame(columns=results_loop.SCORED_COLUMNS)
     return pd.concat(frames, ignore_index=True)
@@ -94,7 +99,7 @@ def score_weeks(
 ) -> None:
     """Score each week in `weeks`: write its scored table and unmatched list, and report coverage."""
     snapshots = load_projection_snapshots()
-    results_loop.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    results_loop.results_dir().mkdir(parents=True, exist_ok=True)
     for week in weeks:
         result = results_loop.score_week(
             week,
@@ -106,7 +111,7 @@ def score_weeks(
         if result is None:
             report.say(f"Week {week}: no archived projections or salary file to score against -- skipped.")
             continue
-        result.scored.to_csv(results_loop.scored_path(season, week), index=False)
+        slate.tag(result.scored).to_csv(results_loop.scored_path(season, week), index=False)
         missing = result.scored[
             (result.scored["Status"] == results_loop.STATUS_UNMATCHED)
             & (pd.to_numeric(result.scored["ProjPts"], errors="coerce") > 0)
@@ -158,6 +163,22 @@ def update_results(
         return report
 
     completed = results_loop.completed_weeks(game_scores)
+    if not slate.is_main():
+        # A secondary slate scores its own week alone, once its own games are final (`slate_week`).
+        own = slate_week(cfg)
+        if own is None:
+            report.published = False
+            report.say(
+                f"The {slate.label()} slate's week is not known (no `week =` under "
+                f"[slates.{slate.current()}] and no week in its sheet's title); nothing scored."
+            )
+            return report
+        if week is not None and week != own:
+            report.published = False
+            report.say(f"The {slate.label()} slate is Week {own}'s, not Week {week}'s; nothing scored.")
+            return report
+        week = own
+        completed = [own] if results_loop.slate_complete(game_scores, slate.current(), season, own) else []
     if week is not None:
         if week not in completed:
             report.published = False
@@ -178,12 +199,15 @@ def update_results(
         report.say("Every completed week is already scored (use --week N or --all to rescore).")
 
     scored = load_all_scored(season)
+    mine = slate.own_rows(scored)  # the signals archive is each slate's own
+    my_weeks = sorted(int(w) for w in mine["week"].unique()) if not mine.empty else []
+    scored = slate_view(scored, my_weeks)
     all_weeks = sorted(int(w) for w in scored["week"].unique()) if not scored.empty else []
-    if write_signals and all_weeks:
+    if write_signals and my_weeks:
         _backfill_signals(
-            scored,
+            mine,
             season,
-            all_weeks,
+            my_weeks,
             report,
             rebuild=set(weeks),
             offense=offense,
@@ -223,16 +247,44 @@ def update_results(
     return report
 
 
+def slate_view(scored: pd.DataFrame, own_weeks: list[int]) -> pd.DataFrame:
+    """What Model Check shows on the active slate's sheet: on a secondary slate, its own week(s) are its own
+    rows only (Week 12 on Thanksgiving's sheet is Thanksgiving's players, not Sunday's too); every other week
+    as read. Main's view is `scored` as it is."""
+    if slate.is_main() or scored.empty or not own_weeks:
+        return scored
+    other = (slate.of(scored) != slate.current()) & scored["week"].astype(int).isin(own_weeks)
+    return scored[~other]
+
+
+def slate_week(cfg: Config) -> int | None:
+    """The NFL week the active secondary slate's sheet is for: `[slates.<key>] week`, else its sheet's title
+    ("Week 12 Thanksgiving"); None when neither says."""
+    from dfs.config import load_base_config
+
+    try:
+        entry = (load_base_config().slates or {}).get(slate.current())
+    except Exception:  # noqa: BLE001 - no readable config: fall back to the title
+        entry = None
+    if entry is not None and entry.week is not None:
+        return int(entry.week)
+    try:
+        title, _ = SheetsClient(cfg.google_sheets).describe()
+    except Exception:  # noqa: BLE001 - the sheet cannot be read
+        return None
+    return slate.title_week(title)
+
+
 def signal_table_path(season: int):
     """Where the Model Check signal records are kept for the Week page (`week_inputs.load_signal_table`)."""
-    return results_loop.RESULTS_DIR / f"signal_table_{season}.csv"
+    return results_loop.results_dir() / f"signal_table_{season}.csv"
 
 
 def _save_signal_table(table: pd.DataFrame, season: int) -> None:
     """Keep the signal records so the Week page can quote them at every render without rebuilding them
     (the R6 history takes minutes). A failed save never fails the update."""
     try:
-        results_loop.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        results_loop.results_dir().mkdir(parents=True, exist_ok=True)
         table.assign(AsOf=datetime.now(UTC).strftime("%Y-%m-%d")).to_csv(
             signal_table_path(season), index=False
         )
@@ -242,7 +294,7 @@ def _save_signal_table(table: pd.DataFrame, season: int) -> None:
 
 def opportunity_table_path(season: int):
     """Where the opportunity-per-dollar record is kept for the Edge Finder's PRICE GAP line."""
-    return results_loop.RESULTS_DIR / f"opportunity_table_{season}.csv"
+    return results_loop.results_dir() / f"opportunity_table_{season}.csv"
 
 
 def _save_opportunity_table(table: pd.DataFrame | None, season: int) -> None:
@@ -251,7 +303,7 @@ def _save_opportunity_table(table: pd.DataFrame | None, season: int) -> None:
     if table is None or table.empty:
         return
     try:
-        results_loop.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        results_loop.results_dir().mkdir(parents=True, exist_ok=True)
         table.assign(AsOf=datetime.now(UTC).strftime("%Y-%m-%d")).to_csv(
             opportunity_table_path(season), index=False
         )
@@ -269,7 +321,12 @@ def _refit_field_own(
         if frame.empty:
             return pd.DataFrame(), pd.DataFrame()
         model = field_own.fit(frame, counts)
-        if model is not None:
+        if model is not None and not slate.may_save_fit():
+            report.say(
+                f"Ownership shadow: the fit is main's ([learning] fit_secondary_slates is off), so the "
+                f"{slate.label()} slate's refit is shown, not saved."
+            )
+        elif model is not None:
             field_own.save(model)
             report.say(
                 f"Ownership shadow refitted on weeks {', '.join(str(w) for w in model.weeks)} "

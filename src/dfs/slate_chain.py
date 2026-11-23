@@ -196,14 +196,22 @@ def for_slate(entries: Sequence, key: str, season: int, weeks: dict[str, int]) -
 
 
 def log_for_slate(frame, key: str, season: int, weeks: dict[str, int]):  # noqa: ANN001, ANN201 - DataFrames
-    """The contest log (`history.read_log`, or `history.typed`) narrowed to slate `key`'s rows. The frame is
-    returned as it is for the main slate when no secondary slate is configured."""
+    """The contest log (`history.read_log`, or `history.typed`) narrowed to slate `key`'s rows: by the log's
+    own `SlateKey` tag when it has one (`slate_close.tag_log`), else by `entry_slate`. The frame is returned
+    as it is for the main slate when no secondary slate is configured."""
     import pandas as pd
 
     k = slate.validate(key)
-    if frame is None or (not weeks and k == slate.MAIN) or len(frame) == 0:
+    if frame is None or len(frame) == 0:
+        return frame
+    if not weeks and k == slate.MAIN and slate.SLATE_COLUMN not in frame.columns and "slate_key" not in frame:
         return frame
     raw = "Contest_Date_EST" in frame.columns
+    tag_col = slate.SLATE_COLUMN if raw else "slate_key"
+    if tag_col in frame.columns:
+        tagged = frame[tag_col].astype(str).str.strip()
+        if tagged.ne("").any():  # the log's own record of each entry's slate (`slate_close.tag_log`)
+            return frame[tagged.where(tagged.ne(""), slate.MAIN) == k]
     dates = pd.to_datetime(frame["Contest_Date_EST" if raw else "date"], errors="coerce")
     games = frame["Game_Type" if raw else "game_type"]
     week_col = pd.to_numeric(frame["Week" if raw else "week"], errors="coerce")

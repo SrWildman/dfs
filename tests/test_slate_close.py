@@ -93,7 +93,7 @@ def test_thanksgiving_standings_are_kept_apart_from_the_main_slates(tmp_path):
     _standings(downloads, "7101")
     got = capture.capture_standings(downloads, dest, slate_close.standings_divert(_cfg(thu="THU"), csv))
     assert [p.name for p in dest.iterdir()] == ["contest-standings-7101.csv"]
-    apart = paths.DATA_DIR / "slates" / "thu" / "dk_standings"
+    apart = paths.DATA_DIR / "slates" / "thu" / "raw" / "dk_standings"
     assert [p.name for p in apart.iterdir()] == ["contest-standings-7001.csv"]
     assert got.new_ids == ["7101"]
     assert any("kept apart" in line for line in capture.describe(got))

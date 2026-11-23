@@ -73,11 +73,13 @@ def fetch_stats_team(season: int) -> pd.DataFrame:
 
 def fetch_game_scores(season: int) -> pd.DataFrame:
     """The season's schedule with final scores (`week`, `away_team`, `home_team`, `away_score`,
-    `home_score`). Team codes are left in nflverse's spelling (`LA`), the same as the two stats files, so
+    `home_score`, and `gameday` when the file has it: a secondary slate is complete when its day's games
+    are). Team codes are left in nflverse's spelling (`LA`), the same as the two stats files, so
     the three merge on `team`; `player_join` normalises `LA` to DraftKings' `LAR` when joining to DK."""
     content = _download(GAMES_CSV_URL, "games.csv")
     _snapshot("game_scores", content, "csv")
     games = pd.read_csv(io.BytesIO(content))
     games = games[(games["season"] == season) & (games["game_type"] == "REG")]
     columns = ["week", "away_team", "home_team", "away_score", "home_score"]
+    columns += [c for c in ("gameday",) if c in games.columns]
     return games[columns].reset_index(drop=True)
