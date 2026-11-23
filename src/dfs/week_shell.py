@@ -15,7 +15,7 @@ each day, the side column's "This week" checklist, and the More bar.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from dfs import kickoff
 from dfs import week_board as wb
@@ -177,7 +177,36 @@ def news_fact(inp: WeekInputs, since=None) -> Fact:  # noqa: ANN001 - datetime |
     )
 
 
+# Sunday's two commands that run more than once (Sam's Week 11 note), on the status line: the final sync on
+# News, the late swap on Swaps open (`docs/SHORTCUTS.md`'s "final sync" and "late swap")
+SUNDAY_SYNC = ("dfs sync --live", "Sync")
+SUNDAY_SWAP = ("dfs lineups late-swap --refresh-injuries", "Late swap")
+
+
+def _with_run(f: Fact, inp: WeekInputs, run: tuple[str, str]) -> Fact:
+    """`f` with its command: "<label> again" and when it last ran once it has run this week."""
+    from dataclasses import replace
+
+    from dfs import nfl_calendar, runlog
+
+    command, label = run
+    start = datetime.combine(
+        nfl_calendar.week_start_date(inp.week, inp.season), datetime.min.time()
+    ).astimezone()
+    last = runlog.last_run(inp.runs, " ".join(w for w in command.split() if not w.startswith("-")))
+    if last is None or last.time < start:
+        return replace(f, run=(command, label))
+    return replace(f, run=(command, f"{label} again"), ran=ran_text(last.time, not last.ok))
+
+
 def sunday_facts(inp: WeekInputs, lv) -> list[Fact]:  # noqa: ANN001
+    facts = _sunday_facts(inp, lv)
+    facts[1] = _with_run(facts[1], inp, SUNDAY_SYNC)
+    facts[3] = _with_run(facts[3], inp, SUNDAY_SWAP)
+    return facts
+
+
+def _sunday_facts(inp: WeekInputs, lv) -> list[Fact]:  # noqa: ANN001
     if lv is None:
         return [
             _lock_fact(lv),
@@ -268,19 +297,43 @@ def status_lines(inp: WeekInputs, lv, by_id: dict[str, str]) -> dict[str, str]: 
 # -- this week (the side) ----------------------------------------------------------------------------------------
 
 
+def ran_text(at, failed: bool = False) -> str:  # noqa: ANN001 - datetime | None
+    """ "last ran Sun 3:41 pm" (Eastern, as every time on the page), "(failed)" when that run did."""
+    if at is None:
+        return ""
+    return f"last ran {kickoff.format_et(at, suffix=False)}" + (" (failed)" if failed else "")
+
+
+def rerun_button(command: str, label: str, live: bool, *, form: bool = False) -> str:
+    """A command that has run, to run once more: a button on the served page, the line to copy on the
+    static one (`run_button`)."""
+    if not live:
+        return run_button(command, label)
+    attr = ' data-form="1"' if form else ""
+    return f'<button type="button" class="runbtn again" data-command="{e(command)}"{attr}>{e(label)}</button>'
+
+
 def this_week_html(steps: list[wb.Step], live: bool) -> str:
+    """The six steps. A step not done has Run; one that has run has Run again and when it last ran (Sam's
+    Week 11 note: late swap above all is run more than once)."""
     rows = []
     for s in steps:
-        act = ""
-        if s.state != wb.DONE and s.command:
-            if live:
-                form = ' data-form="1"' if s.name == "Close" else ""
-                act = f'<button type="button" class="runbtn" data-command="{e(s.command)}"{form}>Run</button>'
+        act, ran = "", ""
+        if s.command:
+            form = s.name == "Close"  # the close asks for its options first
+            if s.state != wb.DONE:
+                if live:
+                    attr = ' data-form="1"' if form else ""
+                    act = f'<button type="button" class="runbtn" data-command="{e(s.command)}"{attr}>Run</button>'
+                else:
+                    act = run_button(s.command, "Run")
             else:
-                act = run_button(s.command, "Run")
+                act = rerun_button(s.command, "Run again", live, form=form)
+                ran = ran_text(s.at, s.failed)
         rows.append(
             f'<li class="{e(s.state)}"><span class="i"></span><span class="w">{e(s.name)}'
             f"<small>{e(s.status)}"
+            + (f' · <span class="ran{" bad" if s.failed else ""}">{e(ran)}</span>' if ran else "")
             + (f" · say {say_html(s.say)}" if s.state == wb.NEXT and not live else "")
             + f"</small></span>{act}</li>"
         )

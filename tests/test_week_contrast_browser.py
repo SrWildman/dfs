@@ -9,6 +9,8 @@ a disabled control and text drawn transparent on purpose (the pool square's "+" 
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 from test_week_style import states
 
@@ -98,6 +100,18 @@ def pages(tmp_path_factory):
     return files
 
 
+ROWS = ":is(tbody tr, .prow, .crow, .orow):visible"
+
+
+def hover_a_row(pg) -> None:
+    """Put the pointer on the first table row (or player row) on screen, so its hover background is under
+    the text the check reads; a view with none is checked as it is."""
+    rows = pg.locator(ROWS)
+    if rows.count():
+        with contextlib.suppress(Exception):
+            rows.first.hover(timeout=1000)
+
+
 def check(pg) -> tuple[int, list[str]]:
     r = pg.evaluate(CHECK, MIN_RATIO)
     return r["checked"], r["bad"]
@@ -117,6 +131,7 @@ def test_every_text_on_the_page_reads_at_4_5_to_1_in_every_state(browser, pages,
                 pg.wait_for_timeout(150)
                 pg.evaluate("() => document.querySelectorAll('details').forEach((d) => { d.open = true; })")
                 pg.wait_for_timeout(100)
+                hover_a_row(pg)  # the row highlight (Sam's Week 11 note) is checked under its text too
                 checked, bad = check(pg)
                 # the browser's own controls (the file input, search fields) follow the theme too
                 assert pg.evaluate("getComputedStyle(document.documentElement).colorScheme") == theme, name
@@ -135,3 +150,31 @@ def test_every_text_on_the_page_reads_at_4_5_to_1_in_every_state(browser, pages,
         f"{len(failures)} below {MIN_RATIO}:1 ({browser.browser_type.name}, {theme}, {width}):\n"
         + "\n".join(sorted(set(failures))[:80])
     )
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_a_table_row_is_highlighted_on_hover_in_both_themes(browser, pages, theme):
+    """Sam's Week 11 note: a subtle highlight on the row under the pointer, in every table, from the design
+    tokens (`row-hover`), in both themes."""
+    ctx = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme=theme)
+    try:
+        pg = ctx.new_page()
+        pg.goto(next(iter(pages.values())) + "#everything")
+        pg.wait_for_timeout(150)
+        row = pg.locator("tbody tr:visible").first
+        before = row.evaluate("(r) => getComputedStyle(r).backgroundColor")
+        row.hover()
+        after = row.evaluate("(r) => getComputedStyle(r).backgroundColor")
+        want = pg.evaluate(
+            "getComputedStyle(document.documentElement).getPropertyValue('--row-hover').trim()"
+        )
+        assert want and before != after
+        probe = pg.evaluate(
+            "(c) => { const d = document.createElement('div'); d.style.backgroundColor = c;"
+            " document.body.append(d); const v = getComputedStyle(d).backgroundColor; d.remove();"
+            " return v; }",
+            want,
+        )
+        assert after == probe
+    finally:
+        ctx.close()

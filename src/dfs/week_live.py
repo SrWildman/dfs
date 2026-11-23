@@ -86,6 +86,14 @@ cursor:pointer}
 .runbtn{background:var(--accent);color:var(--on-fill);border:0;border-radius:6px;padding:3px 12px;cursor:pointer;
 font:inherit;margin-left:6px}
 .confirm{margin:8px 0}.confirm button{margin-top:6px}
+button.working{cursor:progress;opacity:1}button.working:disabled{opacity:1}
+.spin{display:inline-block;width:9px;height:9px;border:2px solid currentColor;border-right-color:transparent;
+border-radius:50%;margin-right:5px;vertical-align:-1px;animation:dfs-spin .8s linear infinite}
+@keyframes dfs-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none;border-right-color:currentColor;opacity:.6}}
+.actst{display:inline-block;font-size:12px;color:var(--ink-2);margin:2px 0 0 6px;max-width:100%;overflow-wrap:anywhere}
+.actst.ok{color:var(--good)}.actst.bad{color:var(--bad)}.actst .actout{margin-left:2px}
+div.opts+.actst,span.lockbtns+.actst,.a+.actst{display:block;margin-left:0}
 .formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px;margin:8px 0}
 .formgrid label{display:flex;flex-direction:column;font-size:12.5px;color:var(--dim);gap:2px}
 .verdict{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0}
@@ -493,19 +501,21 @@ const $$ = (s2, r = document) => [...r.querySelectorAll(s2)];
 function showRunError(text) {
   const out = $('#run-out'); out.hidden = false; out.textContent = text;
 }
-function followJob(job, command) {
+function followJob(job, command, onEnd) {
   current = job; const out = $('#run-out'); out.hidden = false; out.textContent = '$ ' + command + '\n';
   $('#run-stop').hidden = false; $('#run-form').hidden = true;
+  let last = '';   // the job's last line of output: the one-line result its button shows
   const es = new EventSource(url('/api/jobs/stream?job=' + job + '&after=0'));
   es.onmessage = (m) => {
     const ev = JSON.parse(m.data);
-    if (ev.line != null) { out.textContent += ev.line + '\n'; out.scrollTop = out.scrollHeight; }
+    if (ev.line != null) { out.textContent += ev.line + '\n'; out.scrollTop = out.scrollHeight; if (ev.line.trim()) last = ev.line.trim(); }
     if (ev.end != null) {
       es.close(); current = null; $('#run-stop').hidden = true;
+      if (onEnd) onEnd(ev.end, last);
       out.textContent += '\n[exit ' + ev.end + ']'; loadHistory(); refreshSections();
     }
   };
-  es.onerror = () => { es.close(); if (current) setTimeout(() => followJob(job, command), 1000); };
+  es.onerror = () => { es.close(); if (current) setTimeout(() => followJob(job, command, onEnd), 1000); };
 }
 $('#run-stop').onclick = async () => { if (current) { try { await post('/api/jobs/stop', {job: current}); } catch (e) { showRunError(e.message); } } };
 function took(sec) { if (sec == null) return ''; const s2 = Math.round(sec); return s2 < 60 ? s2 + 's' : Math.floor(s2 / 60) + 'm ' + String(s2 % 60).padStart(2, '0') + 's'; }
@@ -525,13 +535,82 @@ async function loadHistory() {
 }
 
 
+/* ---------- every action says it is working, then how it went (Sam's Week 11 note) ----------
+   Run / Run again (any run button), Play / Fade / Pick / Undo (decisions) and Swap / Keep / Later (late
+   swap): while in flight the button shows a spinner and "running…" and every button of the same action is
+   disabled; after a second the elapsed time counts up. Then one line beside it says done or failed, the
+   time, one line of result and, for a command, a link to its output. An action is keyed by what it acts on
+   (the command, the decision, the late-swap row), not by its node, so the refresh that replaces the section
+   draws the same state again. */
+const ACT = new Map();   // key -> {state: 'running' | 'done' | 'failed', label, opt, started, ended, line, link}
+const actKey = (b) => b.matches('button.runbtn') ? 'run:' + b.dataset.command
+  : b.matches('button.lockbtn') ? 'lock:' + b.dataset.row : b.dataset.key ? 'dec:' + b.dataset.key : null;
+function actNodes(key) {
+  const [kind, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)], q = CSS.escape(id);
+  if (kind === 'run') return $$('button.runbtn[data-command="' + q + '"]');
+  if (kind === 'lock') return $$('[data-row="' + q + '"]:is(button.lockbtn, .answered)');
+  return $$('button[data-key="' + q + '"]:is(.opt, .undo, .pivot), .answer[data-key="' + q + '"]');
+}
+// Eastern, lower case, as every other time on the page (`kickoff.format_et`)
+const clock = (d) => d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'}).toLowerCase();
+const elapsed = (ms) => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+function actDraw(key) {
+  const a = ACT.get(key); if (!a) return;
+  const nodes = actNodes(key), running = a.state === 'running', now = Date.now();
+  for (const b of nodes) {
+    if (b.tagName !== 'BUTTON') continue;
+    if (!b.dataset.label) b.dataset.label = b.textContent;
+    const mine = running && (a.opt == null || b.dataset.opt === a.opt || b.dataset.action === a.opt);
+    b.disabled = running; b.classList.toggle('working', mine); b.setAttribute('aria-busy', mine ? 'true' : 'false');
+    if (mine) {
+      const t = now - a.started >= 1000 ? ' ' + elapsed(now - a.started) : '';
+      b.replaceChildren(el('span', 'spin'), document.createTextNode('running…' + t));
+    } else if (b.textContent !== b.dataset.label) b.textContent = b.dataset.label;
+  }
+  // the line: once per place (a step's Run again and Sunday's status line both show a late swap); while
+  // running, only where no button of it says so already (a decision answered, its cash rerun going)
+  const anchors = [...new Set(nodes.map((n) => n.closest('.opts, .lockbtns, .a') || n))];
+  const shown = running && nodes.some((n) => n.classList.contains('working'));
+  for (const at of anchors) {
+    let line = at.nextElementSibling;
+    const mine = line && line.matches('.actst') && line.dataset.act === key;
+    if (shown) { if (mine) line.remove(); continue; }
+    if (!mine) { line = el('span', 'actst'); line.dataset.act = key; line.setAttribute('role', 'status'); at.after(line); }
+    line.className = 'actst ' + (running ? 'run' : a.state === 'done' ? 'ok' : 'bad');
+    const parts = running ? [(a.label || 'running') + '…' + (now - a.started >= 1000 ? ' ' + elapsed(now - a.started) : '')]
+      : [(a.state === 'done' ? 'done ' : 'failed ') + clock(new Date(a.ended)), elapsed(a.ended - a.started), a.line].filter(Boolean);
+    line.replaceChildren(document.createTextNode(parts.join(' · ')));
+    if (!running && a.link) { const o = el('a', 'actout', 'output'); o.href = a.link; line.append(' ', o); }
+  }
+}
+function actDrawAll() { for (const k of ACT.keys()) actDraw(k); }
+let actTick = null;
+function actTicking() {
+  const any = [...ACT.values()].some((a) => a.state === 'running');
+  if (any && !actTick) actTick = setInterval(() => { for (const [k, a] of ACT) if (a.state === 'running') actDraw(k); actTicking(); }, 1000);
+  if (!any && actTick) { clearInterval(actTick); actTick = null; }
+}
+const act = {
+  start(key, opt, label) { ACT.set(key, {state: 'running', opt: opt == null ? null : String(opt), label, started: Date.now()}); actDraw(key); actTicking(); },
+  end(key, ok, line, link) {
+    const a = ACT.get(key) || {started: Date.now()};
+    Object.assign(a, {state: ok ? 'done' : 'failed', ended: Date.now(), line: (line || '').slice(0, 160), link});
+    ACT.set(key, a); actDraw(key); actTicking();
+  },
+  running: (key) => (ACT.get(key) || {}).state === 'running',
+};
+window.dfsAct = act;
+document.addEventListener('dfs-sections', actDrawAll);   // the refresh put the buttons back: draw their state
+
 /* ---------- buttons inside the sections: the next step, Build, Late swap ---------- */
-async function startJob(command, values) {
+/* `key`: the action that follows the job (its button's, or a decision's for its cash rerun) */
+async function startJob(command, values, key, label) {
+  key = key || 'run:' + command;
+  act.start(key, null, label || 'running');
   try {
     const r = await post('/api/jobs/start', {command, values: values || {}, confirm: ''});
-    $('#live-run').scrollIntoView({block: 'start'});
-    followJob(r.job, command);
-  } catch (e) { showRunError(e.message); $('#live-run').scrollIntoView({block: 'start'}); }
+    followJob(r.job, command, (rc, last) => act.end(key, rc === 0, (label ? label + ': ' : '') + (last || (rc === 0 ? 'finished' : 'exit ' + rc)), '#run'));
+  } catch (e) { act.end(key, false, e.message); showRunError(e.message); }
 }
 
 /* ---------- the page's own writes: Pool cells, decisions, the starting pool (week_actions.py) ---------- */
@@ -544,11 +623,18 @@ function toast(text, bad) {
 function showPool(values) { if (window.dfsPool) window.dfsPool.set(values || {}); }
 /* the page's other writes (decisions, the starting pool) wait their turn in the same queue as the pool
    cells (week_ui's dfsQueue): never refused for being second; the queue refreshes the sections at its end */
-function write(path, data) {
+/* `b`: the button clicked, whose action (`dfsAct`) shows running until the write is back, then its message;
+   resolves the server's answer, or null when it failed */
+function write(path, data, b) {
+  const key = b ? actKey(b) : null;
+  if (key) act.start(key, b.dataset.opt || b.dataset.pivot || null, 'saving');
   return new Promise((resolve) => window.dfsQueue.run(async () => {
-    try { const r = await post(path, data); showPool(r.pool); if (r.message) toast(r.message); resolve(r); }
-    catch (e) {
+    try {
+      const r = await post(path, data); showPool(r.pool); if (r.message) toast(r.message);
+      if (key) act.end(key, true, r.message || 'written'); resolve(r);
+    } catch (e) {
       if (e.body && e.body.current && path.startsWith('/api/pool')) showPool(e.body.current);
+      if (key) act.end(key, false, e.message);
       toast(e.message, true); resolve(null);
     }
   }));
@@ -563,7 +649,11 @@ function askFirst(anchor, text, yes, onYes) {
 }
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('button.runbtn');
-  if (b) { if (b.dataset.form) openForm(b.dataset.command, {}, ''); else startJob(b.dataset.command, {}); return; }
+  if (b) {
+    if (b.dataset.form) openForm(b.dataset.command, {}, '');
+    else if (!act.running(actKey(b))) startJob(b.dataset.command, {});
+    return;
+  }
   if (READONLY && e.target.closest('.seg button, .dec button, #start-pool')) { toast('This week is closed: the page writes nothing.', true); return; }
   if (e.target.closest('button[data-action=start-pool]')) { const sp = $('#start-pool'); if (sp) { sp.scrollIntoView({block: 'center'}); sp.click(); } return; }
   const sp = e.target.closest('#start-pool');
@@ -576,21 +666,25 @@ document.addEventListener('click', async (e) => {
     if (opt.dataset.opt === 'pivot') {
       const ul = document.querySelector('ul.pivots[data-key="' + CSS.escape(opt.dataset.key) + '"]'); if (ul) ul.hidden = !ul.hidden; return;
     }
-    const r = await write('/api/decide', {key: opt.dataset.key, option: opt.dataset.opt, rules_was: rulesWas()});
+    const r = await write('/api/decide', {key: opt.dataset.key, option: opt.dataset.opt, rules_was: rulesWas()}, opt);
     rerunCash(r, opt.dataset.key); return;
   }
   const pv = e.target.closest('.dec button.pivot');
-  if (pv) { await write('/api/decide', {key: pv.dataset.key, option: 'pivot', pivot: pv.dataset.pivot, pool_was: pv.dataset.was || '', rules_was: rulesWas()}); return; }
+  if (pv) { await write('/api/decide', {key: pv.dataset.key, option: 'pivot', pivot: pv.dataset.pivot, pool_was: pv.dataset.was || '', rules_was: rulesWas()}, pv); return; }
   const lk = e.target.closest('button.lockbtn');
   if (lk) {
     if (READONLY) { toast('This week is closed: the page records nothing.', true); return; }
     let lineups = []; try { lineups = JSON.parse(lk.dataset.lineups || '[]'); } catch (err) {}
+    const key = actKey(lk), word = lk.dataset.label || lk.textContent;
+    act.start(key, lk.dataset.action, 'recording');
     try {
       const r = await post('/api/lock', {row: lk.dataset.row, action: lk.dataset.action, lineups});
       const tr = lk.closest('tr'); if (tr) tr.classList.add('done');
-      const box = lk.closest('.lockbtns'); if (box) box.replaceWith(el('span', 'answered', lk.textContent));
+      const box = lk.closest('.lockbtns');
+      if (box) { const s = el('span', 'answered', word); s.dataset.row = lk.dataset.row; box.replaceWith(s); }
+      act.end(key, true, (r && r.message) || word + ' recorded');
       if (r && r.message) toast(r.message);
-    } catch (err) { toast(err.message, true); }
+    } catch (err) { act.end(key, false, err.message); toast(err.message, true); }
     return;
   }
   /* blueprint Phase D: one tap gives a recorded decision its reason (a new line in the log; tap again to clear) */
@@ -606,13 +700,14 @@ document.addEventListener('click', async (e) => {
     return;
   }
   const un = e.target.closest('.dec button.undo');
-  if (un) { const r = await write('/api/decide', {key: un.dataset.key, option: 'undo', rules_was: rulesWas()}); rerunCash(r, un.dataset.key); }
+  if (un) { const r = await write('/api/decide', {key: un.dataset.key, option: 'undo', rules_was: rulesWas()}, un); rerunCash(r, un.dataset.key); }
 });
 /* blueprint Phase A: a core Play / Fade or an open-spot pick (and their undo) reruns only the cash builds
    (`dfs lineups suggest --iterate --only cash`), so the Default follows the rules box */
 const CASH_RERUN = {command: 'dfs lineups suggest', values: {iterate: true, only: 'cash'}};
 function rerunCash(r, key) {
-  if (r && /^(core|spot):/.test(key || '')) startJob(CASH_RERUN.command, CASH_RERUN.values);
+  // the decision's own line follows the rerun: "rebuilding the cash lineups… 0:12", then its result
+  if (r && /^(core|spot):/.test(key || '')) startJob(CASH_RERUN.command, CASH_RERUN.values, 'dec:' + key, 'cash builds');
 }
 
 /* ---------- the drop zone ---------- */

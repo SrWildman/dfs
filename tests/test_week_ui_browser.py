@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import re
 import threading
+import time
 
 import pytest
 
@@ -29,8 +30,65 @@ sync_api = pytest.importorskip("playwright.sync_api")
 EDGE = "EdgeRaw"
 
 
+TEAMS = (
+    "ARI ATL BAL BUF CAR CHI CIN CLE DAL DEN DET GB HOU IND JAX KC LV LAC LAR MIA MIN NO NYG PHI PIT SEA SF"
+    " TB TEN WAS"
+).split()
+ROSTER = ["QB", "QB", "RB", "RB", "RB", "RB", "WR", "WR", "WR", "WR", "WR", "WR", "TE", "TE", "TE", "DST"]
+
+
+def slate_of(n: int) -> list[dict]:
+    """`n` more players in a main slate's shape (16 a team, its opponent the next team in the list): the size
+    of Sam's real EdgeRaw, for the tests that measure the page under it."""
+    out = []
+    for i in range(n):
+        t = (i // len(ROSTER)) % len(TEAMS)
+        team, opp = TEAMS[t], TEAMS[t ^ 1]
+        pos = ROSTER[i % len(ROSTER)]
+        out.append(
+            row(
+                f"Big {pos} {team} {i}",
+                pos,
+                team,
+                opp,
+                3000 + (i * 137) % 6000,
+                4.0 + (i * 7) % 19,
+                CashOwn=f"{(i % 30) / 100:.2f}",
+                GppOwn=f"{(i % 25) / 100:.2f}",
+            )
+        )
+    return out
+
+
+class SlowSheet(FakeSheet):
+    """A fake sheet that answers as slowly as Google does: every read and every write waits `latency` s."""
+
+    def __init__(self, latency: float):
+        super().__init__()
+        self.latency = latency
+
+    def read_range(self, tab, a1):
+        time.sleep(self.latency)
+        return super().read_range(tab, a1)
+
+    def batch_read_ranges(self, pairs):
+        time.sleep(self.latency)
+        return super().batch_read_ranges(pairs)
+
+    def update_ranges(self, tab, updates):
+        time.sleep(self.latency)
+        return super().update_ranges(tab, updates)
+
+
 class Served:
-    def __init__(self, tmp_path):
+    def __init__(
+        self,
+        tmp_path,
+        *,
+        extra_players: int = 0,
+        latency: float = 0.0,
+        job_script: str = "echo ran $@; echo second line",
+    ):
         self.tmp_path = tmp_path
         self.rows = rows_with_more_wrs(**OWN)
         self.rows += [
@@ -48,10 +106,11 @@ class Served:
             )
             for i in range(8)
         ]  # enough WRs for a Show more
+        self.rows += slate_of(extra_players)
         for r in self.rows:
             r["Tgt%"], r["Snap%"] = "0.2", "0.7"
         write_csv(tmp_path / "data" / "current" / "edge.csv", self.rows)
-        sheet = FakeSheet()
+        sheet = SlowSheet(latency) if latency else FakeSheet()
         for c, h in enumerate(["Pool", "Name", "Id"]):
             sheet.put(EDGE, 1, c, h)
         for i, r in enumerate(self.rows, start=2):
@@ -80,7 +139,7 @@ class Served:
             claude_available=lambda: False,
             # a stand-in for `python -m dfs.cli`: a run button here never runs a real command
             jobs=week_jobs.JobRunner(
-                python=stub_python(tmp_path, "echo ran $@; echo second line"),
+                python=stub_python(tmp_path, job_script),
                 history_path=tmp_path / "jobs.jsonl",
                 cwd=tmp_path,
                 stop_waits=(0.05, 0.05, 0.05),

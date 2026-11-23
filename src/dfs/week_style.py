@@ -29,7 +29,7 @@ LIGHT = {
     "good": "#17784a", "good-soft": "#e7f4ec", "warn": "#9a5b00", "warn-soft": "#fdf3e2", "bad": "#b4312a",
     "bad-soft": "#fbeceb", "cash": "#1f56d6", "gpp": "#7a3fc4", "gpp-soft": "#f1eafa",
     "wr": "#1f56d6", "rb": "#17784a", "te": "#9a5b00", "s1": "#2a78d6", "s2": "#eb6834", "s3": "#1baf7a",
-    "on-fill": "#fff", "hover": "rgba(20,25,30,.06)", "rest": "#c8ccd3",
+    "on-fill": "#fff", "hover": "rgba(20,25,30,.06)", "row-hover": "rgba(31,86,214,.06)", "rest": "#c8ccd3",
     "bar1": "#2563eb", "bar2": "#15803d", "bar3": "#b45309", "bar4": "#7e22ce", "bar5": "#0e7490",
     "elev": "0 1px 2px rgba(20,25,30,.05)", "pop": "0 6px 20px rgba(0,0,0,.18)",
 }  # fmt: skip
@@ -39,7 +39,8 @@ DARK = {
     "good": "#4cc38a", "good-soft": "#15291f", "warn": "#e2a64a", "warn-soft": "#2c2414", "bad": "#ef7b72",
     "bad-soft": "#2e1a19", "cash": "#6d97ff", "gpp": "#b38cf0", "gpp-soft": "#261d36",
     "wr": "#6d97ff", "rb": "#4cc38a", "te": "#e2a64a", "s1": "#3987e5", "s2": "#d95926", "s3": "#199e70",
-    "on-fill": "#111316", "hover": "rgba(255,255,255,.06)", "rest": "#3a4048",
+    "on-fill": "#111316", "hover": "rgba(255,255,255,.06)", "row-hover": "rgba(109,151,255,.09)",
+    "rest": "#3a4048",
     "bar1": "#6d97ff", "bar2": "#4cc38a", "bar3": "#e2a64a", "bar4": "#b38cf0", "bar5": "#38bdf8",
     "elev": "0 1px 2px rgba(0,0,0,.3)", "pop": "0 6px 20px rgba(0,0,0,.5)",
 }  # fmt: skip
@@ -72,6 +73,8 @@ box-shadow:var(--elev)}
 table{font-size:13px;font-variant-numeric:tabular-nums}
 th{font-size:12px;font-weight:500;color:var(--ink-3)}
 th,td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line)}
+@media(hover:hover){:is(tbody tr,.prow,.crow,.orow):hover{background-color:var(--row-hover)}
+table.stickyname tbody tr:hover>td:first-child{background-image:linear-gradient(var(--row-hover),var(--row-hover))}}
 .chip{font-size:11px}.note,.cap,.legend,.asof,.last{font-size:12px}.fold .line{font-size:13px}
 .fold>details>summary h3{font-size:16px}
 button{font:inherit;font-size:13px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);
@@ -111,6 +114,9 @@ overflow-x:auto;scrollbar-width:none;padding:0}
 .sfact .l{font-size:12px;color:var(--ink-3)}.sfact .v{font-weight:600;white-space:nowrap}
 .sfact .n{font-size:12px;color:var(--ink-3);white-space:nowrap}
 .sfact.warn .v{color:var(--warn)}.sfact.ok .v{color:var(--good)}
+.sfact .a{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;margin-top:4px}
+.sfact .a .runbtn{margin:0;font-size:12px;padding:2px 9px}.sfact .a .ran,.steps .ran{font-size:12px;color:var(--ink-3)}
+.steps .ran.bad{color:var(--bad)}.steps li>.actst{grid-column:2/-1;margin:0}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
 .side{position:sticky;top:64px;display:flex;flex-direction:column;gap:0}
 .side>.vw>section,.side>section{margin-bottom:16px}
@@ -222,6 +228,19 @@ class Fact:
     value: str
     note: str = ""
     tone: str = ""
+    # a command to run from the line (Sunday's sync and late swap, Sam's Week 11 note): (command, label), and
+    # when it last ran
+    run: tuple[str, str] | None = None
+    ran: str = ""
+
+
+def _fact_run(f: Fact) -> str:
+    if f.run is None:
+        return ""
+    from dfs.week_page import run_button  # the served page makes it a button; the static page shows none
+
+    ran = f'<span class="ran">{e(f.ran)}</span>' if f.ran else ""
+    return f'<div class="a">{run_button(*f.run)}{ran}</div>'
 
 
 def status_line(sid: str, facts: list[Fact]) -> str:
@@ -229,6 +248,7 @@ def status_line(sid: str, facts: list[Fact]) -> str:
         f'<div class="sfact{" " + f.tone if f.tone else ""}"><div class="l">{e(f.label)}</div>'
         f'<div class="v">{e(f.value)}</div>'
         + (f'<div class="n">{e(f.note)}</div>' if f.note else "")
+        + _fact_run(f)
         + "</div>"
         for f in facts
     )

@@ -1397,7 +1397,7 @@ def test_a_lock_answer_is_recorded_names_the_swap_and_writes_no_sheet(make, tmp_
     assert rec["id"] == body["id"] and rec["kind"] == "swap" and rec["state"] == "lock"
     assert rec["chosen"]["name"] == "Wr Value" and rec["default_at_time"]["name"] == "Wr Star"
     status, page = client.get("/")
-    assert 'class="answered">Swap<' in page  # answered: the buttons give way to the answer
+    assert 'class="answered" data-row="' in page and '">Swap</span>' in page  # the buttons give way
 
 
 def test_a_lock_answer_on_a_closed_week_or_a_gone_row_is_refused(make, tmp_path):

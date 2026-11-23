@@ -146,9 +146,9 @@ document.addEventListener('click', (e) => {
 /* ---------- the pool store (item 6) ---------- */
 /* `seq` / `at`: every write's read-back is numbered, and a render adopts the sheet's value for a cell only
    when no read-back for it is newer than the moment that render was asked for (`since`, from `pool.mark()`):
-   a refresh that left before a write landed must not put the old value back. `pend`: writes queued per
-   cell; the cell shows "saving" until the last of them is read back. */
-const P = {val: {}, name: {}, team: {}, byName: {}, saving: {}, bad: {}, pend: {}, at: {}, seq: 0};
+   a refresh that left before a write landed must not put the old value back. `saving`: the value a cell
+   shows until the last change on him is read back (the batch queue below). */
+const P = {val: {}, name: {}, team: {}, byName: {}, saving: {}, bad: {}, at: {}, seq: 0};
 const stale = (id, since) => id in P.saving || (since != null && (P.at[id] || 0) > since);
 function adoptFromExplorer(d, since) {
   if (!d || !d.columns) return;
@@ -162,36 +162,62 @@ function adoptFromExplorer(d, since) {
   });
 }
 function adoptFromDom(root, since) {
+  const moved = [];
   for (const seg of $$('.seg[data-id]', root || document)) {
     const id = seg.dataset.id; if (seg.dataset.name) P.name[id] = seg.dataset.name;
-    if (!stale(id, since)) P.val[id] = seg.dataset.was || '';
+    if (!stale(id, since)) { const v = seg.dataset.was || ''; if ((P.val[id] || '') !== v) moved.push(id); P.val[id] = v; }
   }
+  return moved;
 }
-function paint(id) {
-  const v = P.val[id] || '', saving = id in P.saving, bad = id in P.bad, shown = saving ? P.saving[id] : v;
-  for (const seg of $$('.seg[data-id="' + CSS.escape(id) + '"]')) {
+/* Every place that shows a pool value, painted one element at a time: `paint(id)` finds one player's
+   elements, `paintIn(root)` walks a section's once. Sam's Week 11 note: the refresh after a write repainted
+   the whole page once for every section it put back, each player by his own document-wide queries, which
+   froze Firefox for seconds on a real slate (400 players, 40 sections). */
+const PAINT = [
+  ['.seg', 'id', (seg, v, saving, bad, shown) => {
     seg.dataset.was = v; seg.classList.toggle('saving', saving); seg.classList.toggle('bad', bad);
     for (const b of seg.querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === shown);
-  }
-  for (const s of $$('.poolval[data-id="' + CSS.escape(id) + '"]')) {
-    s.textContent = saving ? 'saving…' : (v || 'not in pool'); s.classList.toggle('in', !!v);
-  }
-  for (const b of $$('button.pivot[data-pivot="' + CSS.escape(id) + '"]')) b.dataset.was = v;
-  for (const c of $$('.pchip[data-id="' + CSS.escape(id) + '"]')) chipPaint(c, v, saving);
-  for (const b of $$('button.addpool[data-id="' + CSS.escape(id) + '"]')) b.hidden = !!v && pool.addKind(v, b.dataset.v) === v;
-  for (const tr of $$('tr[data-id="' + CSS.escape(id) + '"]')) tr.classList.toggle('pool-bad', bad);
-  if (window.dfsExplorer) window.dfsExplorer.setPool(id, v);
+  }],
+  ['.poolval', 'id', (s, v, saving) => { s.textContent = saving ? 'saving…' : (v || 'not in pool'); s.classList.toggle('in', !!v); }],
+  ['button.pivot', 'pivot', (b, v) => { b.dataset.was = v; }],
+  ['.pchip', 'id', (c, v, saving) => chipPaint(c, v, saving)],
+  ['button.addpool', 'id', (b, v) => { b.hidden = !!v && pool.addKind(v, b.dataset.v) === v; }],
+  ['tr', 'id', (tr, v, saving, bad) => tr.classList.toggle('pool-bad', bad)],
+];
+const attrOf = (key) => 'data-' + key;
+function stateOf(id) { const v = P.val[id] || '', saving = id in P.saving; return [v, saving, id in P.bad, saving ? P.saving[id] : v]; }
+function paint(id) {
+  const st = stateOf(id), q = CSS.escape(id);
+  for (const [sel, key, fn] of PAINT) for (const n of $$(sel + '[' + attrOf(key) + '="' + q + '"]')) fn(n, ...st);
+  if (window.dfsExplorer) window.dfsExplorer.setPool(id, st[0]);
 }
-function paintAll() { const ids = new Set([...Object.keys(P.val), ...$$('[data-id]').map((n) => n.dataset.id)]); for (const id of ids) paint(id); }
+function paintIn(root) {
+  const memo = {};
+  for (const [sel, key, fn] of PAINT) {
+    for (const n of $$(sel + '[' + attrOf(key) + ']', root || document)) {
+      const id = n.dataset[key]; fn(n, ...(memo[id] || (memo[id] = stateOf(id))));
+    }
+  }
+}
+function paintAll() {
+  paintIn(document);
+  if (window.dfsExplorer) for (const id of Object.keys(P.val)) window.dfsExplorer.setPool(id, P.val[id] || '');
+}
 const pool = {
   get: (id) => P.val[id] || '',
   name: (id) => P.name[id] || id,
   set(values) { for (const [id, v] of Object.entries(values || {})) { P.val[id] = v || ''; delete P.bad[id]; paint(id); } if (window.dfsExplorer) window.dfsExplorer.render(); drawIssues(); },
-  adopt(root, since) { adoptFromDom(root, since); decorate(root); paintAll(); if (window.dfsShade) window.dfsShade.all(root); },
+  /* a section put back (a refresh, a view drawn): adopt its values and paint it; elsewhere, repaint only the
+     players whose value it moved */
+  adopt(root, since) {
+    const moved = adoptFromDom(root, since); decorate(root); paintIn(root);
+    for (const id of moved) paint(id);
+    if (window.dfsShade) window.dfsShade.all(root);
+  },
   adoptExplorer(d, since) { adoptFromExplorer(d, since); },
   mark: () => P.seq,   // a refresh asks for its render after this read-back
   readBack: (id) => P.at[id] || 0,
-  paint, paintAll,
+  paint, paintIn, paintAll,
   saving: (id) => id in P.saving,
   issues: () => Object.assign({}, P.bad),
 };
@@ -211,42 +237,65 @@ async function pump() {
 }
 window.dfsQueue = { run(job) { Q.push(job); pump(); }, busy: () => busy || Q.length > 0 };
 
+/* Pool changes not sent yet (Sam's Week 11 note: quick clicks must all land): Id -> {value} or {add}, in
+   click order. ONE batch in the queue carries every change waiting when it runs, so there is one pool write
+   in flight at a time, however fast the clicks come. A player clicked again before his change is sent keeps
+   only his last value; one clicked while his write is in flight goes in the next batch, checked against
+   that write's read-back. */
+const NEXT = new Map();
+let nextLabels = [], batchQueued = false;
 function requestPool(changes, label) {
   if (!LIVE || READONLY) { toast(READONLY && LIVE ? 'This week is closed: the page writes nothing.' : NOT_SERVED, true); return; }
   changes = changes.filter((c) => c.id);
   if (!changes.length) return;
   // A change may carry `add` (a kind) instead of a value: "+ Cash" on a player whose earlier write is still
-  // queued is resolved when its own write runs, against that write's read-back (GPP + Cash = Both), never
-  // against what the page showed at the click.
+  // in flight is resolved when its own batch is sent, against that write's read-back (GPP + Cash = Both),
+  // never against what the page showed at the click.
   const shown = (id) => (id in P.saving ? P.saving[id] : P.val[id] || '');
   for (const c of changes) {
-    const v = c.add ? pool.addKind(shown(c.id), c.add) : c.value;
-    P.saving[c.id] = v; P.pend[c.id] = (P.pend[c.id] || 0) + 1; delete P.bad[c.id]; paint(c.id);
+    P.saving[c.id] = c.add ? pool.addKind(shown(c.id), c.add) : c.value; delete P.bad[c.id]; paint(c.id);
+    const prev = NEXT.get(c.id);
+    let next;
+    if (!c.add) next = {value: c.value};
+    else if (!prev) next = {add: c.add};
+    else if (prev.add) next = prev.add === c.add ? prev : {value: 'Both'};   // + Cash, + GPP: Both whatever he was
+    else next = {value: pool.addKind(prev.value, c.add)};
+    NEXT.set(c.id, next);
   }
+  if (label) nextLabels.push(label);
   drawIssues();
-  window.dfsQueue.run(async () => {
-    for (const c of changes) if (c.add) c.value = pool.addKind(P.val[c.id] || '', c.add);
-    const done = (id) => { P.pend[id] = Math.max(0, (P.pend[id] || 1) - 1); if (!P.pend[id]) { delete P.saving[id]; delete P.pend[id]; } };
-    // `was` is what the page shows now: the last read-back, never a guess
-    const body = {each: true, changes: changes.map((c) => ({id: c.id, value: c.value, was: P.val[c.id] || ''}))};
-    let r;
-    try { r = await window.dfsLive.pool(body); }
-    catch (e) {
-      for (const c of changes) { done(c.id); P.bad[c.id] = {want: c.value, why: e.message || 'the write failed'}; paint(c.id); }
-      drawIssues(); toast(e.message, true); return;
-    }
-    for (const c of changes) {
-      const res = (r.results || {})[c.id] || {status: 'missing', value: P.val[c.id] || ''};
-      done(c.id); P.at[c.id] = ++P.seq;
-      if (res.status === 'ok') { P.val[c.id] = res.value || ''; delete P.bad[c.id]; }
-      else if (res.status === 'conflict') { P.val[c.id] = res.value || ''; P.bad[c.id] = {want: c.value, why: 'changed in the sheet since the page read it: the sheet has ' + (res.value || 'nothing')}; }
-      else { P.bad[c.id] = {want: c.value, why: 'not on EdgeRaw (sync, then try again)'}; }
-      paint(c.id);
-    }
-    if (window.dfsExplorer) window.dfsExplorer.render();
-    drawIssues();
-    toast((label ? label + ': ' : '') + (r.message || 'written'), Object.keys(r.results || {}).some((k) => r.results[k].status !== 'ok'));
-  });
+  if (!batchQueued) { batchQueued = true; window.dfsQueue.run(sendBatch); }
+}
+async function sendBatch() {
+  batchQueued = false;
+  const changes = [...NEXT].map(([id, c]) => Object.assign({id}, c));
+  const label = [...new Set(nextLabels)].join(' · ');
+  NEXT.clear(); nextLabels = [];
+  if (!changes.length) return;
+  for (const c of changes) if (c.add) c.value = pool.addKind(P.val[c.id] || '', c.add);
+  // a cell stays "saving" while a newer click on him waits for the next batch
+  const done = (id) => { if (!NEXT.has(id)) delete P.saving[id]; };
+  // refused: Sam's sheet wins over a click made before the page knew; the latest click is the one on its row
+  const refuse = (c, why) => { const want = NEXT.has(c.id) ? P.saving[c.id] : c.value; NEXT.delete(c.id); delete P.saving[c.id]; P.bad[c.id] = {want, why}; };
+  // `was` is what the page shows now: the last read-back, never a guess
+  const body = {each: true, changes: changes.map((c) => ({id: c.id, value: c.value, was: P.val[c.id] || ''}))};
+  let r;
+  try { r = await window.dfsLive.pool(body); }
+  catch (e) {
+    for (const c of changes) { refuse(c, e.message || 'the write failed'); paint(c.id); }
+    drawIssues(); toast(e.message, true); return;
+  }
+  for (const c of changes) {
+    const res = (r.results || {})[c.id] || {status: 'missing', value: P.val[c.id] || ''};
+    P.at[c.id] = ++P.seq;
+    if (res.status === 'ok') { P.val[c.id] = res.value || ''; delete P.bad[c.id]; done(c.id); }
+    else if (res.status === 'conflict') { P.val[c.id] = res.value || ''; refuse(c, 'changed in the sheet since the page read it: the sheet has ' + (res.value || 'nothing')); }
+    else refuse(c, 'not on EdgeRaw (sync, then try again)');
+    paint(c.id);
+  }
+  if (window.dfsExplorer) window.dfsExplorer.render();
+  drawIssues();
+  toast((label ? label + ': ' : '') + (r.message || 'written'), Object.keys(r.results || {}).some((k) => r.results[k].status !== 'ok'));
 }
 pool.request = requestPool;
 /* the Cash / GPP / Both / none control, for any place that draws a player from script (the game view, the

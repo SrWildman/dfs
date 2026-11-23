@@ -288,7 +288,7 @@ def decisions_html(
                 if live and d.undo
                 else ""
             )
-            controls = f'<span class="answer">{e(d.answer_text)}</span>{undo}'
+            controls = f'<span class="answer" data-key="{e(d.key)}">{e(d.answer_text)}</span>{undo}'
         elif live:
             controls = "".join(
                 f'<button type="button" class="opt" data-key="{e(d.key)}" data-opt="{e(o.key)}">{e(o.label)}</button>'
@@ -399,7 +399,7 @@ def _cash_controls(d: wb.Decision | None, live: bool, opt_class: str = "opt") ->
             if live and d.undo
             else ""
         )
-        return f'<span class="answer">{e(d.answer_text)}</span>{undo}'
+        return f'<span class="answer" data-key="{e(d.key)}">{e(d.answer_text)}</span>{undo}'
     if live:
         return "".join(
             f'<button type="button" class="{opt_class}" data-key="{e(d.key)}" data-opt="{e(o.key)}">'
@@ -467,7 +467,7 @@ SPOTS_COLS = 7  # player (name, team, kickoff), points, salary, cash own, flags,
 def _pick_cell(c: dict, d: wb.Decision | None, live: bool) -> str:
     """Pick for a candidate (the spot's option is his Id); "Picked" on the answered one; blank on the rest."""
     if d is not None and d.answer:
-        return '<span class="answer">Picked</span>' if d.answer == c.get("id") else ""
+        return f'<span class="answer" data-key="{e(d.key)}">Picked</span>' if d.answer == c.get("id") else ""
     if live and d is not None:
         return f'<button type="button" class="opt" data-key="{e(d.key)}" data-opt="{e(c.get("id", ""))}">Pick</button>'
     return '<button type="button" disabled>Pick</button>'
