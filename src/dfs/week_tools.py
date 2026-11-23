@@ -36,6 +36,7 @@ TOOL_DAY: dict[str, str] = {
     "dfs results update": MON,
     "dfs contests update": MON,
     "dfs bankroll sync": MON,
+    "dfs bankroll carry": MON,
     "dfs research close-report": MON,
     "dfs research refresh": MON,
     "dfs week new": TUE,
