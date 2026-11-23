@@ -581,6 +581,14 @@ have nothing to do with a DraftKings slate, and refuse it (and `DFS_SLATE`) befo
 **If anything fails, play it by hand:** build on the slate's sheet (or in DraftKings) yourself; the main slate
 is untouched either way.
 
+**A small slate** (4 games or fewer, by its draft group: Thanksgiving, Saturdays, Christmas and every playoff slate,
+a playoff Sunday's main slate included; `[small_slate]`). Its sync takes TFFB's own slate for its day (pending until
+TFFB posts it, usually two days before), and the page's header says "3-game slate" with one line on what changes:
+chalk is the slate's own top 10% of double-up ownership instead of a flat 30%, the cheap-pair rule and the builders'
+one RB a game / no DST against his QB are off (the pair is still flagged), the cash line is "not calibrated" (it was
+fitted on main slates), and each GPP build's copies and salary left are listed. The math is in `docs/CALCULATIONS.md`
+"Small slates".
+
 ## The Week page as an app: `dfs week serve`
 
 `dfs week serve` opens the Week page on this Mac only, with Claude Code beside it, folded until you press **Ask Claude**. Ask in the chat instead of

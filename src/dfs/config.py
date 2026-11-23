@@ -366,6 +366,20 @@ class CashConfig(BaseModel):
     cheap_pair_margin: float = Field(1.5, ge=0.0)
 
 
+class SmallSlateConfig(BaseModel):
+    """`[small_slate]`: what changes when a slate is small (`small_slate.py`): its game count, not its day."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # a slate of this many games or fewer is small (Thanksgiving 3, Saturdays 2-3, every playoff slate)
+    max_games: int = Field(4, ge=1)
+    # the cash Default's cheap-pair rule on a small slate (off: 6-8 teams make same-team pairs routine; the
+    # pair is still flagged)
+    cheap_pair: bool = False
+    # the builders' one-RB-a-game and no-DST-against-his-QB rules on a small slate (off by default)
+    hard_rules: bool = False
+
+
 class SlateSheetConfig(BaseModel):
     """`[slates.<key>]`: a secondary slate's sheet (`slate.py`)."""
 
@@ -407,6 +421,7 @@ class Config(BaseModel):
     cash: CashConfig = CashConfig()
     contest_plan: ContestPlanConfig = ContestPlanConfig()
     ledger: LedgerConfig = LedgerConfig()
+    small_slate: SmallSlateConfig = SmallSlateConfig()
     # A secondary slate's own sheet, by slate key (`slate.py`): `[slates.thu] sheet_id = "..."`, written by
     # `dfs week new --slate thu <url>`. Never the main slate's `google_sheets.sheet_id`.
     slates: dict[str, SlateSheetConfig] = {}

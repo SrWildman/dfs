@@ -88,6 +88,7 @@ def leaf(cheap_salary: int, base: Callable | None = None) -> Callable[[Sequence[
 # ---------------------------------------------------------------------------------------------------------
 
 EARNS, PICKED, NO_LINEUP = "earns", "picked", "no lineup without"
+SMALL = "small slate"  # the rule is off on a small slate (`small_slate.py`): the pair is kept and flagged
 
 
 @dataclass(frozen=True)
@@ -96,7 +97,8 @@ class CheapPair:
 
     players: tuple[SwapPlayer, ...]  # the pair (or three), cheapest first
     kept: bool
-    why: str  # EARNS / PICKED (Sam put them there: Always use) / NO_LINEUP (no legal lineup without one)
+    why: str  # EARNS / PICKED (Sam put them there: Always use) / NO_LINEUP (no legal lineup without one) /
+    # SMALL (a small slate: the rule is off, the pair only flagged)
     gain: float | None  # the pair's lineup minus the best without one, points; None without such a lineup
     alternative: tuple[SwapPlayer, ...] = ()  # the best lineup without one (the Default when avoided)
     margin: float = PAIR_MARGIN
@@ -147,6 +149,8 @@ class CheapPair:
             )
         if self.why == NO_LINEUP:
             return f"{self.what}: no legal lineup without them"
+        if self.why == SMALL:
+            return f"{self.what}: kept, the cheap-pair rule is off on a small slate (pairs are routine)"
         return f"{self.what}: {_signed(self.gain)} over {self.without}"
 
 
@@ -193,6 +197,7 @@ def choose(
     own: Mapping[str, float] | None = None,
     cheap_salary: int = CHEAP_SALARY,
     margin: float = PAIR_MARGIN,
+    enforce: bool = True,
 ) -> tuple[list[list[SwapPlayer]], CheapPair | None]:
     """The cash candidates and the pair they hold or avoided. `lineups` is the cash search's, best first;
     `search_free(keep)` runs the same search with "no cheap pair" as a rule and the players `keep` in every
@@ -203,7 +208,8 @@ def choose(
     Returns `lineups` and the kept pair when it earns its place (more than `margin` over the lineup without
     it), when Sam put one of them there (`fixed`: Always use, an open-spot pick; the rule never moves a
     player he did not ask to move) or when no lineup avoids it; else the pair-free lineups and the avoided
-    pair. Both are flagged."""
+    pair. Both are flagged. With `enforce` False (a small slate, `small_slate.py`) nothing is searched again:
+    `lineups` are returned as they are and a pair the best one holds is flagged as kept (`SMALL`)."""
     from dfs.cash_core import default_key, projection
 
     if cheap_salary <= 0 or not lineups:
@@ -216,6 +222,9 @@ def choose(
     names = set(fixed)
     picked = next((ps for ps in found if any(p.name in names for p in ps)), None)
     pair = picked or found[0]
+    if not enforce:
+        owns = {p.name: own[p.name] for p in pair if p.name in own}
+        return lineups, CheapPair(pair, True, SMALL, None, (), margin, None, owns, tuple(best))
     keep = keeper(pair, own)
     free = search_free((keep,)) if keep is not None else []
     if not free:

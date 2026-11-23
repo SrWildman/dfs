@@ -861,6 +861,7 @@ class Call:
     fade_pts: float = 0.0  # FADE↓'s measured effect taken off his projection
     qb: float = 0.0  # the QB downgrade's measured points
     qb_from: str = ""
+    chalk_cut: float | None = None  # a small slate's own chalk cut (`small_slate.py`); None: `CHALK`
 
 
 def _money(x: float) -> str:
@@ -875,7 +876,7 @@ def _is(x: object) -> bool:
     return x is not None and x == x
 
 
-def alternatives(frame: pd.DataFrame) -> pd.DataFrame:
+def alternatives(frame: pd.DataFrame, chalk: float = CHALK) -> pd.DataFrame:
     """Per row: the best alternative at his position within `PRICE_BAND` of his salary by Cash % for the price
     (`alt`, the row index, -1 for none, and `alt_gap`: its Cash % minus his), and the same among the NON-chalk
     players only (`chalk_alt`, `chalk_gap`: the chalk rule's comparison). A blank Cash % is never an
@@ -896,7 +897,7 @@ def alternatives(frame: pd.DataFrame) -> pd.DataFrame:
         mine = value.at[i]
         for col, gap_col, mask in (
             ("alt", "alt_gap", same),
-            ("chalk_alt", "chalk_gap", same & (own < CHALK)),
+            ("chalk_alt", "chalk_gap", same & (own < chalk)),
         ):
             if not mask.any():
                 continue
@@ -914,7 +915,9 @@ def beaten(alts: pd.DataFrame, i: object) -> bool:
     return _is(g) and g >= GAP_EPS
 
 
-def cash_labels(frame: pd.DataFrame, score: pd.Series) -> tuple[pd.Series, pd.DataFrame]:
+def cash_labels(
+    frame: pd.DataFrame, score: pd.Series, chalk: float = CHALK
+) -> tuple[pd.Series, pd.DataFrame]:
     """Label by score within position, then the rules (M1.6). Returns (labels, `alternatives(frame)`).
 
     1. Score: per position the top `CORE_N` CORE, the next `PLAY_N` PLAY.
@@ -925,14 +928,14 @@ def cash_labels(frame: pd.DataFrame, score: pd.Series) -> tuple[pd.Series, pd.Da
        AFTER the chalk rule, and only a player some alternative at his price beats on Cash % (a player whose
        Cash % is better than or equal to every alternative's is never AVOID; he stays NEUTRAL)."""
     labels = pd.Series("NEUTRAL", index=frame.index)
-    alts = alternatives(frame)
+    alts = alternatives(frame, chalk)
     for pos, idx in frame.groupby("Position").groups.items():
         order = score.loc[idx].sort_values(ascending=False, kind="stable").index
         core, play = CORE_N.get(pos, 1), PLAY_N.get(pos, 2)
         labels.loc[order[:core]] = "CORE"
         labels.loc[order[core : core + play]] = "PLAY"
     own = pd.to_numeric(frame["cash_own"], errors="coerce")
-    for i in frame.index[own >= CHALK]:
+    for i in frame.index[own >= chalk]:
         g = alts.at[i, "chalk_gap"]
         if _is(g) and g >= CHALK_GAP:
             if labels.at[i] == "CORE":
@@ -1023,6 +1026,7 @@ def cash_reason(
     contribs: Mapping[str, float],
     alts: Mapping[str, object],
     fade: FadeEffect | None = None,
+    chalk: float = CHALK,
 ) -> str:
     """One sentence that agrees with the label and its numbers (`contradictions` checks every one)."""
     pos, own = row["Position"], row["cash_own"]
@@ -1042,7 +1046,7 @@ def cash_reason(
             + "."
             + news
         )
-    if _is(own) and own >= CHALK:
+    if _is(own) and own >= chalk:
         if _is(cgap) and cgap >= CHALK_GAP:
             if label == "AVOID":
                 return (
@@ -1140,6 +1144,7 @@ def contradictions(c: Mapping) -> list[str]:
     out: list[str] = []
     cash, why = str(c.get("cash") or ""), str(c.get("cash_reason") or "")
     own = num(c.get("cash_own"))
+    chalk = num(c.get("chalk_cut")) or CHALK  # a small slate's own cut, saved with the call
     for pattern, what in (
         (rf"Costs {_NUM} points", "Costs"),
         (rf"adds {_NUM} more", "adds"),
@@ -1159,7 +1164,7 @@ def contradictions(c: Mapping) -> list[str]:
             out.append("cash AVOID though no alternative at his price has a better Cash %")
     if cash in ("CORE", "PLAY") and any(w in why for w in CASH_FADE_WORDS):
         out.append(f"cash {cash} with a reason that says fade him")
-    if own is not None and own >= CHALK and "chalk_gap" in c:
+    if own is not None and own >= chalk and "chalk_gap" in c:
         cgap = num(c.get("chalk_gap"))
         beaten_ = cgap is not None and cgap >= CHALK_GAP
         if cash == "CORE" and beaten_:
@@ -1205,7 +1210,8 @@ def held_back(c: Mapping, kind: str) -> bool:
     """M1.6, until the new labels clear the bar: the Week page shows no cash AVOID on a `CHALK`+ CashOwn
     player, and no label whose reason contradicts it (`contradictions`)."""
     label = str(c.get(kind) or "")
-    if kind == "cash" and label == "AVOID" and (num(c.get("cash_own")) or 0) >= CHALK:
+    chalk = num(c.get("chalk_cut")) or CHALK
+    if kind == "cash" and label == "AVOID" and (num(c.get("cash_own")) or 0) >= chalk:
         return True
     bad = contradictions(c)
     prefix = "cash" if kind == "cash" else "GPP"
@@ -1234,11 +1240,13 @@ def make_calls(
     week: int,
     at: datetime,
     fade: FadeEffect | None = None,
+    chalk: float = CHALK,
 ) -> Calls:
-    """Score and label every row of `wf` (module docstring)."""
+    """Score and label every row of `wf` (module docstring). `chalk` is the chalk rule's cut: `CHALK`, or a
+    small slate's own (`small_slate.py`), saved on each call."""
     frame = wf.frame.reset_index(drop=True)
     sc = scores(frame, weights)
-    c_lab, alts = cash_labels(frame, sc["cash_score"])
+    c_lab, alts = cash_labels(frame, sc["cash_score"], chalk)
     g_lab = gpp_labels(frame, sc["gpp_score"])
 
     def name_of(j: int) -> str:
@@ -1266,7 +1274,7 @@ def make_calls(
                 gpp_own=num(row["gpp_own"]),
                 cash=c_lab.at[i],
                 cash_score=round(float(sc.at[i, "cash_score"]), 3),
-                cash_reason=cash_reason(row, c_lab.at[i], cc, a, fade),
+                cash_reason=cash_reason(row, c_lab.at[i], cc, a, fade, chalk),
                 gpp=g_lab.at[i],
                 gpp_score=round(float(sc.at[i, "gpp_score"]), 3),
                 gpp_reason=gpp_reason(row, g_lab.at[i], gc, fade),
@@ -1284,6 +1292,7 @@ def make_calls(
                 fade_pts=float(row.get("fade_pts", 0.0) or 0.0),
                 qb=float(row.get("qb", 0.0) or 0.0),
                 qb_from=str(row.get("qb_from", "") or ""),
+                chalk_cut=chalk if chalk != CHALK else None,
             )
         )
     notes = [
@@ -1324,6 +1333,8 @@ def make_calls(
 
 def call_dict(c: Call) -> dict:
     d = asdict(c)
+    if d.get("chalk_cut") is None:  # a main slate's call reads exactly as before
+        d.pop("chalk_cut", None)
     return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in d.items()}
 
 
@@ -1596,7 +1607,10 @@ def compute_live(
         games=live_games(week, data_dir),
         fade=fade,
     )
-    calls = make_calls(wf, weights, season=season, week=week, at=now, fade=fade)
+    from dfs import small_slate
+
+    chalk = small_slate.frame_cut(edge, CHALK)  # a small slate's own chalk cut; CHALK on a main slate
+    calls = make_calls(wf, weights, season=season, week=week, at=now, fade=fade, chalk=chalk)
     if save_record:
         rec = save(calls, data_dir=data_dir)
     else:

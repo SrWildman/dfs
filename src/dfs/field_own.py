@@ -26,6 +26,7 @@ weeks before it. Everything here is pure apart from the loaders and `save` / `lo
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from collections.abc import Iterable, Sequence
@@ -182,22 +183,54 @@ def ownership_published(frame: pd.DataFrame) -> bool:
     return bool((_num(frame, "Own%").fillna(0.0) > 0).any())
 
 
-def attach(frame: pd.DataFrame, model: FieldOwnModel | None) -> pd.DataFrame:
+def follow_tffb(model: FieldOwnModel) -> FieldOwnModel:
+    """The model with the GPP sharpening off (`k` = 1): each position's shares are TFFB's own, scaled to the
+    position's total. For a small slate (`small_slate.py`), where TFFB models that slate's own concentration
+    and the main-slate `k` was never fitted."""
+    return dataclasses.replace(model, exponent={**model.exponent, "gpp": 1.0})
+
+
+def attach(frame: pd.DataFrame, model: FieldOwnModel | None, *, small: bool = False) -> pd.DataFrame:
     """The edge frame with `GppOwn`, `CashOwn` and `OurOwn` filled (fractions, like `Own%`); blank when there
     is no fitted model yet or TFFB has not published ownership. Every row is one slate, so it needs no
-    `week` column."""
+    `week` column.
+
+    `small` (a small slate, `small_slate.py`): `GppOwn` and `OurOwn` follow TFFB's slate ownership
+    (`follow_tffb`) instead of the main-slate sharpening, which `shadow` keeps beside it; `CashOwn` is the
+    same double-up model as on a main slate (TFFB has no double-up number). A main slate is unchanged."""
     out = frame.copy()
     for column in COLUMNS:
         out[column] = np.nan
     if model is None or out.empty or not ownership_published(out):
         return out
     slate = out.assign(week=0)
-    out[GPP_COLUMN] = predict(slate, model, "gpp").round(4)
+    gpp_model = follow_tffb(model) if small else model
+    out[GPP_COLUMN] = predict(slate, gpp_model, "gpp").round(4)
     out[CASH_COLUMN] = predict(slate, model, "cash").round(4)
-    out[OUR_COLUMN] = predict_ours(slate, model).round(4)
+    out[OUR_COLUMN] = predict_ours(slate, gpp_model).round(4)
     excluded = ~eligible(out)
     out.loc[excluded, list(COLUMNS)] = 0.0
     return out
+
+
+SHADOW_FILE = "own_shadow.csv"  # a small slate's shadow, in its synced files (`store.current_dir`)
+SHADOW_COLUMN = "ModelGppOwn"
+
+
+def shadow(frame: pd.DataFrame, model: FieldOwnModel | None) -> pd.DataFrame:
+    """A small slate's ownership shadow: TFFB's `Own%`, the `GppOwn` shown (TFFB's, `follow_tffb`) and what
+    the main-slate model would show (`ModelGppOwn`, the sharpened one), for every eligible player TFFB owns.
+    Empty without a model or published ownership."""
+    cols = ["Name", "Position", "Team", "Own%", GPP_COLUMN, SHADOW_COLUMN]
+    if model is None or frame.empty or not ownership_published(frame):
+        return pd.DataFrame(columns=cols)
+    slate = frame.assign(week=0)
+    out = frame[["Name", "Position", "Team"]].copy()
+    out["Own%"] = _num(frame, "Own%").round(4)
+    out[GPP_COLUMN] = predict(slate, follow_tffb(model), "gpp").round(4)
+    out[SHADOW_COLUMN] = predict(slate, model, "gpp").round(4)
+    keep = eligible(frame) & (out["Own%"].fillna(0) > 0)
+    return out[keep].sort_values(GPP_COLUMN, ascending=False).reset_index(drop=True)[cols]
 
 
 # ---------------------------------------------------------------------------------------------------------

@@ -19,10 +19,10 @@ Pure: everything reads `WeekInputs` and the board.
 
 from __future__ import annotations
 
+from dfs import small_slate, week_plays
 from dfs import week_board as wb
-from dfs import week_plays
 from dfs.week_inputs import WeekInputs
-from dfs.week_page import CHALK_THRESHOLD, TRUST, builds_of, chip_html, e, num, pct, pn
+from dfs.week_page import TRUST, builds_of, chip_html, e, num, pct, pn
 from dfs.week_style import card, fold
 
 POSITIONS = week_plays.POSITIONS
@@ -95,8 +95,10 @@ def your_cash_lineup(inp: WeekInputs) -> tuple[list[str], str]:
 
 
 def chalk_not_on(inp: WeekInputs, names: list[str]) -> list[dict] | None:
-    """The 30%+ CashOwn players not in `names`, most owned first; None before CashOwn publishes."""
+    """The 30%+ CashOwn players not in `names` (a small slate: its own cut, `week_plays.slate_cut`), most
+    owned first; None before CashOwn publishes."""
     mine = set(names)
+    cut = week_plays.slate_cut(inp.edge)
     published = False
     out = []
     for r in inp.edge or []:
@@ -104,7 +106,7 @@ def chalk_not_on(inp: WeekInputs, names: list[str]) -> list[dict] | None:
         if own is None:
             continue
         published = True
-        if own >= CHALK_THRESHOLD and r.get("Name") not in mine and wb.avail(r) not in ("OUT", "IR"):
+        if own >= cut and r.get("Name") not in mine and wb.avail(r) not in ("OUT", "IR"):
             out.append(r)
     if not published:
         return None
@@ -152,6 +154,7 @@ def chalk_html(
     by_id = {wb.pid(d.row): d for d in ds or [] if d.kind == "chalk" and d.row}
     names, where = lineup if lineup is not None else your_cash_lineup(inp)
     rows = chalk_not_on(inp, names)
+    line = small_slate.percent(week_plays.slate_cut(inp.edge))
     title = "Chalk you're not on"
     if not names:
         return card(sid, title, '<p class="empty">No cash lineup yet: it compares the chalk with one.</p>')
@@ -163,7 +166,7 @@ def chalk_html(
         return card(
             sid,
             title,
-            f'<p class="empty">Every player projected at 30%+ cash ownership is in {e(where)}.</p>',
+            f'<p class="empty">Every player projected at {line}+ cash ownership is in {e(where)}.</p>',
             sub=f"against {e(where)}",
         )
     ranks = wb.game_rank(inp.edge or [])
@@ -199,7 +202,7 @@ def chalk_html(
         sid,
         title,
         f'<div class="sec-b flush"><table class="t">{head}{"".join(body)}</table></div>',
-        sub=f"30%+ projected cash ownership, not in {e(where)}",
+        sub=f"{line}+ projected cash ownership, not in {e(where)}",
         foot=foot
         if foot is not None
         else "The double-up field is expected to play them and your lineup does not. Play writes "

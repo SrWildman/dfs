@@ -40,6 +40,7 @@ from dfs import (
     pool_store,
     sheet_edge_finder,
     slate,
+    small_slate,
     store,
     suggest_state,
 )
@@ -60,6 +61,7 @@ from dfs.late_swap_search import (
     METRICS,
     lineup_state,
     projection_note,
+    relaxed_rules,
     suggest,
     swap_pool,
 )
@@ -3526,8 +3528,12 @@ def _chalk_warnings(edge: pd.DataFrame, built: list[tuple[list[str], str]], now:
         if (k := parse_kickoff(g)) is not None and k <= now
     }
     for goal, threshold in (("cash", cw.CASH_PROJECTED_OWN), ("gpp", cw.GPP_PROJECTED_OWN)):
+        threshold = small_slate.column_cut(edge, "Own%", threshold)  # a small slate: its own
         sets = [names for names, g in built if g == goal]
-        line = cw.warning_line(cw.missing_chalk(edge, sets, threshold=threshold, started=kicked), kind=goal)
+        line = cw.warning_line(
+            cw.missing_chalk(edge, sets, threshold=threshold, started=kicked),
+            kind=goal,
+        )
         if line:
             console.print(escape(line.replace("your gpp", "your GPP")), style="yellow", highlight=False)
     _lineup_set_warnings(edge, built)
@@ -3991,18 +3997,22 @@ def lineups_late_swap(
         )
     # Live by default (Plan C): the late-swap retro's gain is the game state. --field brings its own state.
     resolved_state = None if field else (state or SwapState.live).value
-    _run_late_swap(
-        cfg,
-        top=top,
-        metric=metric.value if metric else cfg.projection.default,
-        all_players=all_players,
-        now=datetime.now(UTC),
-        goal=goal.value if goal else None,
-        fixed_lines=fixed_lines,
-        refresh_injuries=refresh_injuries,
-        field=field,
-        state=resolved_state if resolved_state == SwapState.live.value else None,
-    )
+    small = _small_slate(cfg)
+    if small.line():
+        console.print(small.line())
+    with relaxed_rules(small.relax_rules):  # a small slate's builds hold the same rules as its swaps
+        _run_late_swap(
+            cfg,
+            top=top,
+            metric=metric.value if metric else cfg.projection.default,
+            all_players=all_players,
+            now=datetime.now(UTC),
+            goal=goal.value if goal else None,
+            fixed_lines=fixed_lines,
+            refresh_injuries=refresh_injuries,
+            field=field,
+            state=resolved_state if resolved_state == SwapState.live.value else None,
+        )
 
 
 @lineups_app.command("suggest")
@@ -4117,7 +4127,9 @@ def lineups_suggest(
     if only is not None and not iterate:
         console.print("[red]--only goes with --iterate (a fresh run builds both kinds).[/red]")
         raise typer.Exit(code=2)
-    with build_exact.use(_builds_solver(cfg)):  # `[builds] solver`: every search of this run
+    small = _small_slate(cfg)
+    # `[builds] solver`: every search of this run; a small slate's relaxed hard rules (`small_slate.py`)
+    with build_exact.use(_builds_solver(cfg)), relaxed_rules(small.relax_rules):
         _run_suggest(
             cfg,
             cash=cash,
@@ -4133,6 +4145,62 @@ def lineups_suggest(
             restore_round=round_,
             only=only.value if only is not None else None,
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class _SmallSlate:
+    """What a small slate changes for this run (`small_slate.py`, `[small_slate]`); off on a main slate."""
+
+    size: small_slate.SlateSize | None = None
+    relax_rules: bool = False  # one RB a game / no DST against his QB off
+    enforce_pair: bool = True  # the cheap-pair rule steers the cash Default
+
+    @property
+    def small(self) -> bool:
+        return self.size is not None and self.size.small
+
+    def line(self) -> str | None:
+        if not self.small:
+            return None
+        off = [
+            *(() if self.enforce_pair else ("the cheap-pair rule (still flagged)",)),
+            *(("one RB a game", "no DST against his QB") if self.relax_rules else ()),
+        ]
+        return (
+            f"Small slate ({self.size.label}): chalk is this slate's own top 10% of double-up ownership"
+            + (f"; off: {', '.join(off)}" if off else "")
+            + "."
+        )
+
+
+def _small_slate_notes(report, cap: int) -> list[str]:  # noqa: ANN001 - lineup_suggest.SuggestReport
+    """A small slate's lines on the run: the copies assumption, and each GPP build's copies and salary left
+    (a dupe lever on a small slate: information, never a rule)."""
+    rows = []
+    for b in report.builds:
+        if b.kind != "gpp":
+            continue
+        left = cap - b.salary
+        copies = "copies unknown (no ownership)" if b.e_dups is None else f"~{b.e_dups:.1f} copies"
+        rows.append(f"GPP build {b.number}: {copies}, ${left:,} left")
+    notes = [small_slate.COPIES_NOTE]
+    if rows:
+        notes.append(small_slate.SALARY_LEFT_NOTE + " " + "; ".join(rows) + ".")
+    return notes
+
+
+def _small_slate(cfg: Config) -> _SmallSlate:
+    """The running slate's size and what it switches (`[small_slate]`); a main slate's is all off."""
+    from dfs.config import SmallSlateConfig
+
+    sc = getattr(cfg, "small_slate", None) or SmallSlateConfig()
+    try:
+        size = small_slate.current(sc.max_games)
+    except Exception:  # noqa: BLE001 - an unreadable file: treated as a main slate
+        size = None
+    if size is None or not size.small:
+        return _SmallSlate(size)
+    return _SmallSlate(size, relax_rules=not sc.hard_rules, enforce_pair=sc.cheap_pair)
 
 
 def _builds_solver(cfg: Config) -> str:
@@ -4189,6 +4257,9 @@ def _run_suggest(
     console.print(f"Suggesting lineups for: [bold]{title}[/bold]\n{url}\n")
     metric = cfg.projection.default
     console.print(f"Projection: {projection_note(metric)}.")
+    small = _small_slate(cfg)
+    if small.line():
+        console.print(small.line())
     if not tags:
         console.print(
             "[yellow]Your pool is empty, so there is nothing to build from. Tick players into it "
@@ -4263,6 +4334,7 @@ def _run_suggest(
             rank=rank,
             cheap_salary=_cash_cfg(cfg).cheap_salary,
             cheap_pair_margin=_cash_cfg(cfg).cheap_pair_margin,
+            enforce_pair=small.enforce_pair,
         )
         report.builds = [
             dataclasses.replace(b, note="; ".join(t for p in b.players if (t := frame.tag(p.name))))
@@ -4304,6 +4376,7 @@ def _run_suggest(
             bring_back_gain=gain,
             cheap_salary=_cash_cfg(cfg).cheap_salary,
             cheap_pair_margin=_cash_cfg(cfg).cheap_pair_margin,
+            enforce_pair=small.enforce_pair,
             freeze=restored is not None,
             only=only,
         )
@@ -4313,6 +4386,8 @@ def _run_suggest(
         )  # parse problems come from iterate
     if frame:
         report.notes.insert(0, suggest_state.frame_note(frame))
+    if small.small:
+        report.notes.extend(_small_slate_notes(report, cfg.lineups.salary_cap))
     record = suggest_state.RoundRecord(
         round=state.next_round(),
         at=now.astimezone(UTC).isoformat(timespec="seconds"),
@@ -4366,6 +4441,7 @@ def _run_suggest(
             (core_payload or {}).get("default", {}).get("band", {}).get("shown"),
             _cash_record(),
             *_du_line_offset(),
+            small=small_slate.frame_is_small(edge),
         )
         for line in cc.summary_lines(report.cash_core, band):
             console.print(line, markup=False, highlight=False, soft_wrap=True)
@@ -4458,7 +4534,13 @@ def _cash_core_payload(  # noqa: ANN001
         (b.number for b in report.builds if b.kind == "cash" and {p.name for p in b.players} == default), None
     )
     offset, weeks = _du_line_offset()
-    band = cc.band(shown.get(number) if number is not None else None, _cash_record(), offset, weeks)
+    band = cc.band(
+        shown.get(number) if number is not None else None,
+        _cash_record(),
+        offset,
+        weeks,
+        small=small_slate.frame_is_small(edge),
+    )
     report.cash_band = band.text
     rows = edge.to_dict("records")
     details = cc.details_from_rows(rows)

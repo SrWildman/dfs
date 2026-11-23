@@ -43,6 +43,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from dfs import small_slate
 from dfs.player_join import normalize_team
 from dfs.sim.field import FieldModel, build_field, has_ownership
 from dfs.sim.roles import ROLE_NAMES
@@ -133,6 +134,7 @@ class SimLines:
     # Lineups and Suggested only (None: the switch is off, or no calibration is saved). Rankings use `field`.
     display_field: FieldModel | None = None
     calibrated_on: str = ""  # "Weeks 4-8 double-ups": what the display field was calibrated on
+    small: bool = False  # a small slate (`small_slate.py`): the cash offset was fitted on main slates only
 
     @property
     def relative(self) -> bool:
@@ -149,6 +151,11 @@ class SimLines:
         field = self.shown_field
         if field is None:
             return f"cash line {self.cash_line:g}  ·  GPP target {self.gpp_target:g}  ·  {self.mode} lines"
+        if self.small:
+            return (
+                f"{small_slate.CASH_LINE_NOTE}: the cash band's line = field average +{field.cash_offset:g}, "
+                f"Top 1% = field average +{field.top_offset:g}"
+            )
         calibrated = (
             f" (calibrated on {self.calibrated_on or 'your double-ups'})"
             if self.display_field is not None
@@ -228,6 +235,19 @@ def resolve_lines(
     display, calibrated, calibrated_on = (
         _calibrated_display(field) if getattr(lines, "calibrated_cash_offset", False) else (None, "", "")
     )
+    if small_slate.frame_is_small(edge):  # a small slate: the same field, said plainly to be uncalibrated
+        return SimLines(
+            "relative",
+            cash.value,
+            gpp_target,
+            field,
+            f"Lines move with this small slate's field, but {small_slate.CASH_LINE_NOTE}: Cash % beats the "
+            f"field average +{lines.double_up_offset:g}, Top 1% beats it +{lines.gpp_top1_offset:g} "
+            "(untested on a small slate).",
+            f"{small_slate.CASH_LINE_NOTE}; cash line = the field's average score +{field.cash_offset:g}",
+            "Top 1%",
+            small=True,
+        )
     return SimLines(
         "relative",
         cash.value,

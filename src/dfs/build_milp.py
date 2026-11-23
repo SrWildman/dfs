@@ -61,6 +61,7 @@ from dfs.late_swap_search import (
     SwapPlayer,
     _assign_to_slots,
     conflicts,
+    hard_rules,
 )
 
 SCALE = 1000.0  # the objective handed to HiGHS is the score times this (module docstring)
@@ -212,14 +213,14 @@ def build_model(
         for i in index:
             if conflicts(players[i], held):
                 m.out(i)
-        for team in {p.team for p in players if p.position == "QB"}:
+        for team in {p.team for p in players if p.position == "QB"} if hard_rules() else ():
             pair = where(
                 lambda p, team=team: (
                     (p.position == "QB" and p.team == team) or (p.position == "DST" and p.opp == team)
                 )
             )
             m.row(m.count(pair), hi=1)
-        for game in {p.game for p in players if p.position == "RB" and p.game}:
+        for game in {p.game for p in players if p.position == "RB" and p.game} if hard_rules() else ():
             m.row(m.count(where(lambda p, game=game: p.position == "RB" and p.game == game)), hi=1)
         if shape is not None:
             _shape_rows(m, held, shape, qb, own, max_stack_own)

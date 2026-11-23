@@ -739,12 +739,12 @@ def role_chips(r: wb.BoardRow, practice: str = "") -> str:
     return chips
 
 
-def own_td(value: float | None, pending: bool) -> str:
+def own_td(value: float | None, pending: bool, chalk: float = wb.CHALK) -> str:
     if pending:
         return '<td class="n dim" title="ownership publishes ~Fri/Sat">-</td>'
     if value is None:
         return '<td class="n">-</td>'
-    hot = " hot" if value >= wb.CHALK else ""
+    hot = " hot" if value >= chalk else ""
     return f'<td class="n{hot}">{pct(value)}</td>'
 
 
@@ -844,8 +844,8 @@ def board_html(
                 f"<td class=n>{'-' if implied is None else f'{implied:.1f}'}</td>"
                 f"<td class=n>${week_plays.salary(r.row):,.0f}</td><td class=n>{r.calpts:.1f}</td>"
                 f"<td class=n>{(wb.per_k(r.row) or 0):.2f}</td>"
-                + own_td(num(r.row.get("CashOwn")), b.cash_pending)
-                + own_td(num(r.row.get("GppOwn")), b.gpp_pending)
+                + own_td(num(r.row.get("CashOwn")), b.cash_pending, b.chalk)
+                + own_td(num(r.row.get("GppOwn")), b.gpp_pending, b.chalk)
                 + f'<td class="why">{why}</td><td>{pool_seg(r.id, r.name, pool_by_id.get(r.id, ""), live)}</td></tr>'
             )
         if more:

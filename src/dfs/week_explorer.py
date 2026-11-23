@@ -420,7 +420,9 @@ def _src_spread(row: dict) -> float | None:
     return round(max(values) - min(values), 2) if len(values) >= 2 else None
 
 
-def derived_values(row: dict, pool: dict[str, str], roles: dict[str, list[str]]) -> dict[str, object]:
+def derived_values(
+    row: dict, pool: dict[str, str], roles: dict[str, list[str]], chalk: float = week_plays.CHALK
+) -> dict[str, object]:
     cal, props = num(row.get("CalPts")), num(row.get("PropPts"))
     implied = implied_total(row)
     value = week_plays.value_per_k(row)
@@ -428,7 +430,7 @@ def derived_values(row: dict, pool: dict[str, str], roles: dict[str, list[str]])
     return {
         PER_K: round(value, 2) if value is not None else None,
         IMPLIED: round(implied, 1) if implied is not None else None,
-        CHALK: "chalk" if own is not None and own >= week_plays.CHALK else "",
+        CHALK: "chalk" if own is not None and own >= chalk else "",
         PROPS_GAP: round(props - cal, 2) if props is not None and cal is not None else None,
         SRC_SPREAD: _src_spread(row),
         POOL: pool.get(pid(row), ""),
@@ -472,10 +474,11 @@ def payload(
     group_of = {c: g for g, cs in groups() for c in cs}
     roles = b.role_of()
     rows_in = players(inp.edge)
+    cut = week_plays.slate_cut(inp.edge)
     data = []
     ids = []
     for r in rows_in:
-        extra = derived_values(r, pool_by_id, roles)
+        extra = derived_values(r, pool_by_id, roles, cut)
         data.append([_cell(c, extra[c] if c in extra else r.get(c)) for c in cols])
         ids.append(pid(r))
     builds: dict[str, list[str]] = {}

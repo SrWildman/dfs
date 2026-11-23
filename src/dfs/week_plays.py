@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from dfs import kickoff
+from dfs import kickoff, small_slate
 from dfs.derived import VAL_ADJ_ROSTERABLE_TOP_N
 
 POSITIONS = ("QB", "RB", "WR", "TE", "DST")
@@ -126,7 +126,15 @@ def floor_per_k(row: dict) -> float | None:
     return floor / (sal / 1000) if floor is not None and sal > 0 else None
 
 
-def cash_core_guess(at: list[dict], pos: str, *, per: int | None = None) -> list[tuple[dict, bool]]:
+def slate_cut(edge: list[dict] | None) -> float:
+    """The chalk cut for this slate (`small_slate.rows_cut`): `CHALK` on a main slate; on a small slate its
+    own top 10% of double-up ownership, never under `CHALK`."""
+    return small_slate.rows_cut(edge, CHALK)
+
+
+def cash_core_guess(
+    at: list[dict], pos: str, *, per: int | None = None, chalk: float = CHALK
+) -> list[tuple[dict, bool]]:
     """One position's cash core GUESS, before the first build (once `dfs lineups suggest` has run, the board's
     Cash core is the real one: `cash_core.py`'s players in 70%+ of the near-optimal lineups), as
     `(row, chalk_core)`: the top `CASH_CORE_CAP[pos]` (and at most `per`) by
@@ -141,7 +149,7 @@ def cash_core_guess(at: list[dict], pos: str, *, per: int | None = None) -> list
 
     def is_chalk(r: dict) -> bool:
         own = num(r.get("CashOwn"))
-        return own is not None and own >= CHALK
+        return own is not None and own >= chalk
 
     kept = {id(r) for r in ranked}
     extra = sorted(
@@ -264,7 +272,9 @@ def chips_of(row: dict) -> list[str]:
     return [t for t in ("FADE↓", "USAGE↑", "USAGE↓", "INJ+", "Proj ▼", "Proj ▲") if t in tokens]
 
 
-def make_play(row: dict, kind: str, *, pool: dict[str, str], lev: float | None = None) -> Play:
+def make_play(
+    row: dict, kind: str, *, pool: dict[str, str], lev: float | None = None, chalk: float = CHALK
+) -> Play:
     cash_own, gpp_own = num(row.get("CashOwn")), num(row.get("GppOwn"))
     return Play(
         name=row.get("Name", ""),
@@ -287,7 +297,7 @@ def make_play(row: dict, kind: str, *, pool: dict[str, str], lev: float | None =
         cash_own=cash_own,
         gpp_own=gpp_own,
         lev=lev,
-        chalk=cash_own is not None and cash_own >= CHALK,
+        chalk=cash_own is not None and cash_own >= chalk,
         floor_per_k=floor_per_k(row),
         chips=chips_of(row),
         in_pool=pool.get(row.get("Name", ""), ""),
@@ -369,6 +379,7 @@ def plays(
     edge: list[dict] | None, pool: dict[str, str] | None = None, *, per: int = PER_POSITION
 ) -> PlaysView:
     pool = pool or {}
+    cut = slate_cut(edge)
     rows = rosterable(edge or [])
     cash_pub, gpp_pub = own_published(rows, "CashOwn"), own_published(rows, "GppOwn")
     value: dict[str, list[Play]] = {}
@@ -379,15 +390,15 @@ def plays(
         if not at:
             continue
         by_value = _top(at, lambda r: (-(value_per_k(r) or 0.0), -(num(r.get("CalPts")) or 0.0)), per)
-        value[pos] = [make_play(r, "value", pool=pool) for r in by_value]
+        value[pos] = [make_play(r, "value", pool=pool, chalk=cut) for r in by_value]
         cash[pos] = []
-        for r, chalk_core in cash_core_guess(at, pos, per=per):
-            play = make_play(r, "cash", pool=pool)
+        for r, chalk_core in cash_core_guess(at, pos, per=per, chalk=cut):
+            play = make_play(r, "cash", pool=pool, chalk=cut)
             play.chalk_core = chalk_core
             cash[pos].append(play)
-        gpp[pos] = _gpp(at, pool, gpp_pub, per)
+        gpp[pos] = _gpp(at, pool, gpp_pub, per, cut)
     fades = [
-        make_play(r, "fade", pool=pool)
+        make_play(r, "fade", pool=pool, chalk=cut)
         for r in _top(
             [r for r in (edge or []) if has_token(r, FADE) and avail(r) not in UNPLAYABLE and salary(r) > 0],
             lambda r: -(num(r.get("CalPts")) or 0.0),
@@ -396,7 +407,7 @@ def plays(
     ]
     pool_rows = {id(r) for r in rows}
     shadow = [
-        make_play(r, "warn", pool=pool)
+        make_play(r, "warn", pool=pool, chalk=cut)
         for r in _top(
             [
                 r
@@ -412,7 +423,7 @@ def plays(
     return PlaysView(value, cash, gpp, fades, shadow, not cash_pub, not gpp_pub, len(rows))
 
 
-def _gpp(at: list[dict], pool: dict[str, str], published: bool, per: int) -> list[Play]:
+def _gpp(at: list[dict], pool: dict[str, str], published: bool, per: int, cut: float = CHALK) -> list[Play]:
     """GPP upside at one position: best Boom%; once GppOwn is out, the top half of Boom% by leverage."""
     booms = [(r, num(r.get("Boom%"))) for r in at]
     booms = [(r, b) for r, b in booms if b is not None]
@@ -422,7 +433,7 @@ def _gpp(at: list[dict], pool: dict[str, str], published: bool, per: int) -> lis
             lambda r: (-(num(r.get("Boom%")) or 0.0), -(num(r.get("Ceiling")) or 0.0)),
             per,
         )
-        return [make_play(r, "gpp", pool=pool) for r in top]
+        return [make_play(r, "gpp", pool=pool, chalk=cut) for r in top]
     owned = [(r, num(r.get("GppOwn"))) for r, _ in booms]
     owned = [(r, o) for r, o in owned if o is not None]
     if len(owned) < 2:
@@ -436,7 +447,7 @@ def _gpp(at: list[dict], pool: dict[str, str], published: bool, per: int) -> lis
         if boom >= boom_mid:
             levs.append((r, round(pct_rank(boom, boom_values) - pct_rank(own, own_values))))
     levs.sort(key=lambda x: (-x[1], -(num(x[0].get("Boom%")) or 0.0)))
-    return [make_play(r, "gpp", pool=pool, lev=lev) for r, lev in levs[:per]]
+    return [make_play(r, "gpp", pool=pool, lev=lev, chalk=cut) for r, lev in levs[:per]]
 
 
 # -- the slate --------------------------------------------------------------------------------------------

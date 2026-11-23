@@ -39,6 +39,17 @@ Fix: try again later; the other sources still synced. If it never appears, play 
 
 ---
 
+**`dfs sync --slate thu`: projections "pending: TFFB has no Classic slate for the thu slate yet", or "More than one
+TFFB slate could be the thu slate", or "TFFB's slate for the thu slate has games off Thursday".**
+Cause: a secondary slate's projections and ownership come from TFFB's own slate for that day, picked by name in the
+optimizer's slate list ("Week 12 Classic (Thu)"; a range like "Classic (Thu-Mon)" never counts). Pending: TFFB has not
+posted it yet (usually two days before). Two names: the tool will not guess. Games off the day: TFFB's slate is not
+the DraftKings one.
+Fix: pending, sync again later. Otherwise look at the optimizer's slate dropdown and tell a session which name it
+is; the sync never builds the slate from another slate's players.
+
+---
+
 **A command you used to run says "No such command".**
 Cause: this project's CLI got reorganized (one-time sheet construction
 moved under `dfs setup ...`, `dfs sheets doctor` promoted to top-level

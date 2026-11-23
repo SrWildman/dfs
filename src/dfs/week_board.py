@@ -29,7 +29,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from dfs import kickoff, nfl_calendar, week_plays
+from dfs import kickoff, nfl_calendar, small_slate, week_plays
 from dfs.week_inputs import WeekInputs, parse_time
 from dfs.week_plays import FADE, POSITIONS, num
 
@@ -178,6 +178,7 @@ class Board:
     gpp_pending: bool
     players: int
     cash_real: bool = False  # the Cash core role is the last build's real core (else the guess)
+    chalk: float = CHALK  # the slate's chalk cut (`week_plays.slate_cut`: 30% unless the slate is small)
 
     def rows(self) -> list[BoardRow]:
         return [r for pos in POSITIONS for r in self.by_pos.get(pos, [])]
@@ -203,14 +204,15 @@ def real_core(inp: WeekInputs) -> set[str]:
 def _with_real_core(view, edge: list[dict], core: set[str], pool: dict[str, str]) -> None:  # noqa: ANN001
     """The plays view's Cash core replaced by the build's real core (and every 30%+ CashOwn player beside it,
     as chalk core, as before)."""
+    cut = week_plays.slate_cut(edge)
     for pos in POSITIONS:
         at = [r for r in week_plays.rosterable(edge) if r.get("Position") == pos]
         plays = []
         for r in sorted(at, key=lambda r: -(num(r.get("CalPts")) or 0.0)):
             own = num(r.get("CashOwn"))
-            chalk = own is not None and own >= CHALK
+            chalk = own is not None and own >= cut
             if str(r.get("Name")) in core or chalk:
-                play = week_plays.make_play(r, "cash", pool=pool)
+                play = week_plays.make_play(r, "cash", pool=pool, chalk=cut)
                 play.chalk_core = chalk
                 plays.append(play)
         view.cash[pos] = plays
@@ -256,7 +258,14 @@ def board(inp: WeekInputs) -> Board:
             rows.append(BoardRow(row, [FADE_ROLE], i < SHOWN, why_facts(row, ranks), record))
         if rows:
             out[pos] = rows
-    return Board(out, view.cash_own_pending, view.gpp_own_pending, view.players, cash_real=bool(core))
+    return Board(
+        out,
+        view.cash_own_pending,
+        view.gpp_own_pending,
+        view.players,
+        cash_real=bool(core),
+        chalk=week_plays.slate_cut(edge),
+    )
 
 
 # -- the pool ----------------------------------------------------------------------------------------------
@@ -388,11 +397,13 @@ def parsed_rules(inp: WeekInputs, rules: dict[str, str] | None):
 
 
 def chalk_rows(inp: WeekInputs) -> list[dict]:
-    """Every non-DST player the double-ups are expected to own at `CHALK`+, most owned first."""
+    """Every non-DST player the double-ups are expected to own at `CHALK`+ (a small slate: its own cut,
+    `week_plays.slate_cut`), most owned first."""
+    cut = week_plays.slate_cut(inp.edge)
     rows = [
         r
         for r in inp.edge or []
-        if (num(r.get("CashOwn")) or 0) >= CHALK
+        if (num(r.get("CashOwn")) or 0) >= cut
         and r.get("Position") != "DST"
         and avail(r) not in week_plays.UNPLAYABLE
     ]
@@ -849,13 +860,15 @@ def brief(inp: WeekInputs, b: Board, panel: PoolPanel, lock_first: Sentence | No
             (r for r in chalk if avail(r) not in week_plays.UNPLAYABLE),
             key=lambda r: -(num(r["CashOwn"]) or 0),
         )[:3]
-        heavy = [r for r in top if (num(r["CashOwn"]) or 0) >= CHALK]
+        cut = week_plays.slate_cut(edge)
+        heavy = [r for r in top if (num(r["CashOwn"]) or 0) >= cut]
         items = [f"{_p(r)} ({(num(r['CashOwn']) or 0) * 100:.0f}% in double-ups)" for r in top]
+        line = small_slate.percent(cut)
         tail = (
-            f" {_join([_p(r) for r in heavy])} {'is' if len(heavy) == 1 else 'are'} 30%+: play or fade "
+            f" {_join([_p(r) for r in heavy])} {'is' if len(heavy) == 1 else 'are'} {line}+: play or fade "
             f"{'him' if len(heavy) == 1 else 'them'} on purpose."
             if heavy
-            else " Nobody is at 30% yet."
+            else f" Nobody is at {line} yet."
         )
         out["chalk"] = Sentence("chalk", f"Cash core forming around {_join(items)}.{tail}", top)
     team_news = news_sentence(inp)
