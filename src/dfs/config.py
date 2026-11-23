@@ -372,6 +372,9 @@ class SlateSheetConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sheet_id: str
+    # The NFL week the sheet is for (`dfs week new --slate` writes it): which week's entries are this slate's
+    # (`slate_chain`). Left out (a sheet set up before it existed), the sheet's own title says.
+    week: int | None = None
 
 
 class Config(BaseModel):

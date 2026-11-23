@@ -94,9 +94,14 @@ _PERCENT = {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}
 
 
 def _week_row(week: int) -> list:
-    r = FIRST_ROW + week - 1
+    return slate_row(week, FIRST_ROW + week - 1)
+
+
+def slate_row(label: int | str, r: int, first_row: int = FIRST_ROW) -> list:
+    """One Season row A:S for the label in A (a week number, or "12 Thu" for a secondary slate) on sheet row
+    `r`: the formula columns E and N:Q, every money column blank."""
     return [
-        week,
+        label,
         "",
         "",
         "",
@@ -109,10 +114,10 @@ def _week_row(week: int) -> list:
         "",
         "",
         "",
-        f"=SUM($B${FIRST_ROW}:B{r})",
-        f"=SUM($C${FIRST_ROW}:C{r})",
-        f"=SUM($D${FIRST_ROW}:D{r})",
-        cum_total_formula(r),
+        f"=SUM($B${first_row}:B{r})",
+        f"=SUM($C${first_row}:C{r})",
+        f"=SUM($D${first_row}:D{r})",
+        cum_total_formula(r, first_row),
         "",
         "",
     ]
@@ -123,25 +128,62 @@ def total_net_formula(r: int) -> str:
     return f"=B{r}+C{r}+D{r}+R{r}"
 
 
-def cum_total_formula(r: int) -> str:
+def cum_total_formula(r: int, first_row: int = FIRST_ROW) -> str:
     """Column Q: the running Total Net (E), so the chart's Total line includes other sports."""
-    return f"=SUM($E${FIRST_ROW}:E{r})"
+    return f"=SUM($E${first_row}:E{r})"
 
 
-def total_risked_formula() -> str:
-    g, h, i, s_ = (f"{c}{FIRST_ROW}:{c}{LAST_ROW}" for c in ("G", "H", "I", "S"))
+def total_risked_formula(first_row: int = FIRST_ROW, last_row: int = LAST_ROW) -> str:
+    g, h, i, s_ = (f"{c}{first_row}:{c}{last_row}" for c in ("G", "H", "I", "S"))
     return f"=SUM({g})+SUM({h})+SUM({i})+SUM({s_})"
 
 
-def other_ytd_row() -> list:
-    r = YTD_OTHER_ROW
+def other_ytd_row(first_row: int = FIRST_ROW, last_row: int = LAST_ROW, r: int = YTD_OTHER_ROW) -> list:
     return [
         OTHER_YTD_LABEL,
-        f"=SUM(R{FIRST_ROW}:R{LAST_ROW})",
-        f"=SUM(S{FIRST_ROW}:S{LAST_ROW})",
+        f"=SUM(R{first_row}:R{last_row})",
+        f"=SUM(S{first_row}:S{last_row})",
         guard_formula(f"=B{r}/C{r}"),
         "",
         "",
+    ]
+
+
+YTD_LABEL = "Year to date"
+YTD_ROW_LABELS = ("Cash", "GPP", "Betting", "Total", OTHER_YTD_LABEL)  # in order, under the header row
+
+
+def ytd_block(first_row: int = FIRST_ROW, last_row: int = LAST_ROW, label_row: int = YTD_LABEL_ROW) -> list:
+    """The "Year to date" block A:F, from its label row down to the Other sports row, summing Season rows
+    `first_row`..`last_row` (every slate row, a secondary slate's included)."""
+    cash_r, gpp_r, bet_r, total_r, other_r = (label_row + 2 + i for i in range(5))
+    b, g, i = f"B{first_row}:B{last_row}", f"G{first_row}:G{last_row}", f"I{first_row}:I{last_row}"
+    c, h = f"C{first_row}:C{last_row}", f"H{first_row}:H{last_row}"
+    d = f"D{first_row}:D{last_row}"
+    e = f"E{first_row}:E{last_row}"
+    wins, losses, pushes, exp_wins = (f"{col}{first_row}:{col}{last_row}" for col in ("J", "K", "L", "M"))
+    return [
+        [YTD_LABEL],
+        ["", "Net", "Risked", "ROI", "Record (W-L-P)", "Exp. Wins"],
+        ["Cash", f"=SUM({b})", f"=SUM({g})", guard_formula(f"=B{cash_r}/C{cash_r}"), "", ""],
+        ["GPP", f"=SUM({c})", f"=SUM({h})", guard_formula(f"=B{gpp_r}/C{gpp_r}"), "", ""],
+        [
+            "Betting",
+            f"=SUM({d})",
+            f"=SUM({i})",
+            guard_formula(f"=B{bet_r}/C{bet_r}"),
+            f'=SUM({wins})&"-"&SUM({losses})&"-"&SUM({pushes})',
+            f'=ROUND(SUM({exp_wins}),1)&" vs "&SUM({wins})',
+        ],
+        [
+            "Total",
+            f"=SUM({e})",
+            total_risked_formula(first_row, last_row),
+            guard_formula(f"=B{total_r}/C{total_r}"),
+            "",
+            "",
+        ],
+        other_ytd_row(first_row, last_row, other_r),
     ]
 
 
@@ -149,61 +191,118 @@ def build_season_grid() -> list[list]:
     rows: list[list] = [HEADER]
     rows.extend(_week_row(w) for w in range(1, MAX_WEEK + 1))
     rows.append([])  # row 20, blank spacer
-    rows.append(["Year to date"])  # row 21
-    rows.append(["", "Net", "Risked", "ROI", "Record (W-L-P)", "Exp. Wins"])  # row 22
-
-    b, g, i = f"B{FIRST_ROW}:B{LAST_ROW}", f"G{FIRST_ROW}:G{LAST_ROW}", f"I{FIRST_ROW}:I{LAST_ROW}"
-    c, h = f"C{FIRST_ROW}:C{LAST_ROW}", f"H{FIRST_ROW}:H{LAST_ROW}"
-    d = f"D{FIRST_ROW}:D{LAST_ROW}"
-    e = f"E{FIRST_ROW}:E{LAST_ROW}"
-    wins, losses, pushes, exp_wins = (
-        f"J{FIRST_ROW}:J{LAST_ROW}",
-        f"K{FIRST_ROW}:K{LAST_ROW}",
-        f"L{FIRST_ROW}:L{LAST_ROW}",
-        f"M{FIRST_ROW}:M{LAST_ROW}",
-    )
-
-    rows.append(
-        ["Cash", f"=SUM({b})", f"=SUM({g})", guard_formula(f"=B{YTD_CASH_ROW}/C{YTD_CASH_ROW}"), "", ""]
-    )  # 23
-    rows.append(
-        ["GPP", f"=SUM({c})", f"=SUM({h})", guard_formula(f"=B{YTD_GPP_ROW}/C{YTD_GPP_ROW}"), "", ""]
-    )  # 24
-    rows.append(
-        [
-            "Betting",
-            f"=SUM({d})",
-            f"=SUM({i})",
-            guard_formula(f"=B{YTD_BETTING_ROW}/C{YTD_BETTING_ROW}"),
-            f'=SUM({wins})&"-"&SUM({losses})&"-"&SUM({pushes})',
-            f'=ROUND(SUM({exp_wins}),1)&" vs "&SUM({wins})',
-        ]
-    )  # 25
-    rows.append(
-        [
-            "Total",
-            f"=SUM({e})",
-            total_risked_formula(),
-            guard_formula(f"=B{YTD_TOTAL_ROW}/C{YTD_TOTAL_ROW}"),
-            "",
-            "",
-        ]
-    )  # 26
-    rows.append(other_ytd_row())  # 27
+    rows.extend(ytd_block())  # rows 21-27
     return rows
 
 
-def chart_data_grid() -> list[list]:
-    """S1:W(LAST_ROW+1): header, Week 0 = $0 baseline, then week w mirrors
-    Season row FIRST_ROW+w-1's cumulative N:Q. A week with no Cash/GPP/
-    Betting net yet gives #N/A, which a line chart leaves as a gap (the
-    #N/A is muted in the sheet itself, see `add_season_chart`)."""
-    rows: list[list] = [CHART_HEADER, [0, 0, 0, 0, 0]]
-    for week in range(1, MAX_WEEK + 1):
-        r = FIRST_ROW + week - 1
+def chart_data_grid(rows: list[int] | None = None) -> list[list]:
+    """T1:X(n+2): header, Week 0 = $0 baseline, then one row per Season row (`rows`, the sheet rows of the
+    slate labels, in order; the 18 week rows when left out) mirroring its cumulative N:Q. A row with no
+    Cash/GPP/Betting net yet gives #N/A, which a line chart leaves as a gap (the #N/A is muted in the sheet
+    itself, see `add_season_chart`)."""
+    grid: list[list] = [CHART_HEADER, [0, 0, 0, 0, 0]]
+    for r in rows if rows is not None else range(FIRST_ROW, LAST_ROW + 1):
         has_data = f"COUNT($B{r}:$D{r})=0"
-        rows.append([f"=A{r}"] + [f"=IF({has_data},NA(),{col}{r})" for col in ("N", "O", "P", "Q")])
-    return rows
+        grid.append([f"=A{r}"] + [f"=IF({has_data},NA(),{col}{r})" for col in ("N", "O", "P", "Q")])
+    return grid
+
+
+# -- a secondary slate's row (slate_chain.py) ----------------------------------------------------------------
+#
+# A secondary slate ("12 Thu") gets a Season row of its own, between Week 11's and Week 12's, by a real row
+# insert (`SheetsClient.insert_rows`), so Sheets moves every formula range on the tab with it. Nothing in
+# Python holds a Season row number after that: `label_rows` finds every slate row by its label in column A,
+# the "Year to date" block by its label, and the chart block is rebuilt from the rows found.
+
+LABEL_SCAN_ROWS = 60  # column A is read this far down for the slate labels (18 weeks and a few slates)
+
+
+def label_rows(client: SheetsClient, tab: str, first_row: int = FIRST_ROW) -> list[tuple[int, str]]:
+    """`(sheet row, label)` for every Season row, from `first_row` down to the first cell that is not a slate
+    label ("12", "12 Thu"; `slate_chain.parse_label`): the blank spacer above "Year to date"."""
+    from dfs import slate_chain
+
+    values = client.read_range(tab, f"A{first_row}:A{first_row + LABEL_SCAN_ROWS - 1}")
+    out: list[tuple[int, str]] = []
+    for i, row in enumerate(values):
+        cell = str(row[0]).strip() if row and row[0] not in (None, "") else ""
+        if slate_chain.parse_label(cell) is None:
+            break
+        out.append((first_row + i, cell))
+    return out
+
+
+def insert_at(labels: list[tuple[int, str]], label: str) -> int:
+    """The sheet row a new slate label goes in, by date: before the first row that comes after it, else
+    right under the last one."""
+    from dfs import slate_chain
+
+    new = slate_chain.label_position(label)
+    for r, text in labels:
+        pos = slate_chain.label_position(text)
+        if pos is not None and new is not None and pos > new:
+            return r
+    return labels[-1][0] + 1 if labels else FIRST_ROW
+
+
+def insert_slate_row(
+    client: SheetsClient, tab: str, label: str, first_row: int = FIRST_ROW
+) -> tuple[int, list[str]]:
+    """Insert the Season row for a secondary slate (`label`, "12 Thu") in date order, with its own formulas
+    (E, N:Q) and money formats; rewrite the "Year to date" block over every slate row (a row added under the
+    last one is outside the old sums) and the chart block from the rows found. Returns the new row and what
+    was done. Raises SeasonSlateRowError, before any write, when the tab is not the layout this expects."""
+    labels = label_rows(client, tab, first_row)
+    if not labels:
+        raise SeasonSlateRowError(f"{tab}: no week rows found from A{first_row} -- nothing written")
+    if any(text.casefold() == label.casefold() for _, text in labels):
+        raise SeasonSlateRowError(f"{tab}: {label!r} already has a row -- nothing written")
+    ytd_before = _ytd_label_row(client, tab, labels[-1][0])
+    if ytd_before is None:
+        raise SeasonSlateRowError(
+            f"{tab}: no {YTD_LABEL!r} block (Cash, GPP, Betting, Total, Other sports) under the week rows -- "
+            "nothing written"
+        )
+    header = client.read_range(tab, f"A{HEADER_ROW}:Z{HEADER_ROW}")
+    chart_here = other_columns_state(header[0] if header else []) == "done"
+
+    at = insert_at(labels, label)
+    client.insert_rows(tab, at_row=at, count=1)
+    rows = sorted([r + 1 if r >= at else r for r, _ in labels] + [at])
+    last = rows[-1]
+    ytd = ytd_before + 1
+    updates = {
+        f"A{at}:S{at}": [slate_row(label, at, first_row)],
+        f"A{ytd}:F{ytd + len(YTD_ROW_LABELS) + 1}": ytd_block(first_row, last, ytd),
+    }
+    if chart_here:
+        first_col, last_col = CHART_COLS[0], CHART_COLS[-1]
+        updates[f"{first_col}{HEADER_ROW}:{last_col}{HEADER_ROW + 1 + len(rows)}"] = chart_data_grid(rows)
+    client.update_ranges(tab, updates)
+    for cols in (f"B{at}:I{at}", f"N{at}:S{at}"):  # money; J:M are counts
+        client.format_range(tab, cols, _CURRENCY)
+    done = [
+        f"{tab}: inserted row {at} for {label!r} (date order); {YTD_LABEL!r} sums rows {first_row}-{last}",
+    ]
+    if chart_here:
+        done.append(f"{tab}: chart block rebuilt over {len(rows)} rows")
+    return at, done
+
+
+def _ytd_label_row(client: SheetsClient, tab: str, after_row: int) -> int | None:
+    """The "Year to date" label's row, a few rows under the last slate row (None when it is not there)."""
+    values = client.read_range(tab, f"A{after_row + 1}:A{after_row + 12}")
+    cells = [str(row[0]).strip() if row else "" for row in values]
+    expected = [YTD_LABEL, "", *YTD_ROW_LABELS]
+    for i, cell in enumerate(cells):
+        if cell == YTD_LABEL:
+            found = (cells[i : i + len(expected)] + [""] * len(expected))[: len(expected)]
+            return after_row + 1 + i if found == expected else None
+    return None
+
+
+class SeasonSlateRowError(Exception):
+    pass
 
 
 def add_season_chart(client: SheetsClient, tab: str) -> str:
@@ -214,21 +313,24 @@ def add_season_chart(client: SheetsClient, tab: str) -> str:
     if other_columns_state(header[0] if header else []) == "ready":
         return f"{tab}: chart not rebuilt -- the tab predates the Other columns; run `dfs setup other-sports`"
     first, last = CHART_COLS[0], CHART_COLS[-1]
-    client.update_range(tab, f"{first}{HEADER_ROW}:{last}{CHART_LAST_ROW}", chart_data_grid())
+    # One chart row per Season row: a secondary slate's row ("12 Thu") is a point of its own, in date order.
+    rows = [r for r, _ in label_rows(client, tab)] or None
+    chart_last = CHART_LAST_ROW if rows is None else HEADER_ROW + 1 + len(rows)
+    client.update_range(tab, f"{first}{HEADER_ROW}:{last}{chart_last}", chart_data_grid(rows))
     client.format_range(tab, f"{first}{HEADER_ROW}:{last}{HEADER_ROW}", _HEADER_FMT)
     client.format_range(
         tab,
-        f"{first}{FIRST_ROW}:{last}{CHART_LAST_ROW}",
+        f"{first}{FIRST_ROW}:{last}{chart_last}",
         {"textFormat": {"foregroundColor": {"red": 0.55, "green": 0.58, "blue": 0.62}, "fontSize": 9}},
     )
     for col in CHART_COLS[1:]:
-        client.format_range(tab, f"{col}{FIRST_ROW}:{col}{CHART_LAST_ROW}", _CURRENCY)
+        client.format_range(tab, f"{col}{FIRST_ROW}:{col}{chart_last}", _CURRENCY)
     client.delete_charts(tab)
     client.add_line_chart(
         tab,
         title="Cumulative net by week",
-        domain_a1=f"{first}{HEADER_ROW}:{first}{CHART_LAST_ROW}",
-        series_a1=[f"{col}{HEADER_ROW}:{col}{CHART_LAST_ROW}" for col in CHART_COLS[1:]],
+        domain_a1=f"{first}{HEADER_ROW}:{first}{chart_last}",
+        series_a1=[f"{col}{HEADER_ROW}:{col}{chart_last}" for col in CHART_COLS[1:]],
         anchor_cell_a1=CHART_ANCHOR_CELL,
         plot_hidden_data=True,
     )

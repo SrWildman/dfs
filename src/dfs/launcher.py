@@ -282,6 +282,7 @@ MORE_LABELS = {
     "dfs pool clear": "Clear your whole pool",
     "dfs odds movement": "Which betting lines moved since the last sync",
     "dfs bankroll sync": "Reconcile a DK contest-history CSV into Bankroll",
+    "dfs bankroll carry": "Start this sheet's bankroll from the previous slate's Ending (by date)",
     "dfs bankroll stakes": "Rebuild the STAKES block: your ROI by format and this week's plan",
     "dfs contests update": "Keep the DK downloads, learn from the standings, rebuild the Contests tab",
     "dfs contests plan": "This week's contest plan by format, and last week against it (terminal only)",

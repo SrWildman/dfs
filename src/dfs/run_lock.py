@@ -44,6 +44,7 @@ WRITERS = frozenset(
     {
         "dfs backtest",
         "dfs bankroll build-betting-ledger",
+        "dfs bankroll carry",
         "dfs setup native-lookups",
         "dfs bankroll stakes",
         "dfs bankroll sync",

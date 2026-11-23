@@ -62,9 +62,12 @@ class WeekBankrollNet:
     gpp_risked: float
     other_net: float = 0.0
     other_risked: float = 0.0
+    key: str = "main"  # the slate (`slate_chain`): "main" is the row labelled "12", "thu" the row "12 Thu"
 
 
-def read_ledger_week_totals(client: SheetsClient, bankroll_tab: str, week: int) -> WeekBankrollNet:
+def read_ledger_week_totals(
+    client: SheetsClient, bankroll_tab: str, week: int, key: str = "main"
+) -> WeekBankrollNet:
     """This week's Cash/GPP net and cost as the sheet's OWN weekly summary shows
     them (`Bankroll!D12/H12` and `D13/H13`), not re-derived from the DK export.
 
@@ -90,16 +93,49 @@ def read_ledger_week_totals(client: SheetsClient, bankroll_tab: str, week: int) 
         gpp_risked=_num(f"{cost}{GPP_SUMMARY_ROW}"),
         other_net=_num(f"{net}{OTHER_SUMMARY_ROW}"),
         other_risked=_num(f"{cost}{OTHER_SUMMARY_ROW}"),
+        key=key,
     )
 
 
-def _find_week_row(client: SheetsClient, tab: str, cfg: SeasonConfig, week: int) -> int | None:
-    a_values = client.read_range(tab, f"{WEEK_COLUMN}{cfg.first_row}:{WEEK_COLUMN}{cfg.last_row}")
-    for i, row in enumerate(a_values):
-        cell = row[0].strip() if row and row[0] else ""
-        if cell.isdigit() and int(cell) == week:
-            return cfg.first_row + i
-    return None
+def row_labels(client: SheetsClient, cfg: SeasonConfig) -> dict[tuple[int, str], int]:
+    """`{(week, slate key): sheet row}` for every Season row, found by its label in column A ("12" is
+    `(12, "main")`, "12 Thu" is `(12, "thu")`; `slate_chain.parse_label`), from `first_row` down to the blank
+    row above "Year to date". A secondary slate's row moves every row under it down one, so nothing here
+    holds a row number."""
+    from dfs import slate_chain
+    from dfs.sheet_season_view import label_rows
+
+    out: dict[tuple[int, str], int] = {}
+    for r, text in label_rows(client, cfg.tab, cfg.first_row):
+        parsed = slate_chain.parse_label(text)
+        if parsed is not None:
+            out.setdefault(parsed, r)
+    return out
+
+
+def _find_week_row(
+    client: SheetsClient, tab: str, cfg: SeasonConfig, week: int, key: str = "main"
+) -> int | None:
+    if tab != cfg.tab:
+        cfg = cfg.model_copy(update={"tab": tab})
+    return row_labels(client, cfg).get((week, key))
+
+
+def ensure_slate_row(
+    client: SheetsClient, cfg: SeasonConfig, week: int, key: str
+) -> tuple[int | None, list[str]]:
+    """The Season row for slate `key` of Week `week`, and what was done to get it. A main week's row is
+    pre-built (None when missing: nothing is inserted for it). A secondary slate's row ("12 Thu") is
+    inserted in date order the first time (`sheet_season_view.insert_slate_row`). Raises
+    `sheet_season_view.SeasonSlateRowError` when the tab is not the layout that insert expects."""
+    from dfs import slate
+    from dfs.sheet_season_view import insert_slate_row
+    from dfs.slate_chain import season_label
+
+    row = _find_week_row(client, cfg.tab, cfg, week, key)
+    if row is not None or key == slate.MAIN:
+        return row, []
+    return insert_slate_row(client, cfg.tab, season_label(week, key), cfg.first_row)
 
 
 def write_season_cash_gpp(
@@ -117,16 +153,11 @@ def write_season_cash_gpp(
     Also writes Other Net/Risked (R/S) unless `other_columns` is False (a
     Season tab from before Plan D item 2: see `has_other_columns`)."""
     tab = cfg.tab
-    a_values = client.read_range(tab, f"{WEEK_COLUMN}{cfg.first_row}:{WEEK_COLUMN}{cfg.last_row}")
-    row_by_week: dict[int, int] = {}
-    for i, row in enumerate(a_values):
-        cell = row[0].strip() if row and row[0] else ""
-        if cell.isdigit():
-            row_by_week[int(cell)] = cfg.first_row + i
+    rows = row_labels(client, cfg)
 
     written = []
     for week, stats in sorted(updates.items()):
-        row = row_by_week.get(week)
+        row = rows.get((week, stats.key))
         if row is None:
             continue
         client.update_range(
@@ -154,6 +185,7 @@ def write_season_betting_and_ending(
     *,
     betting_stats: WeeklyBettingStats | None = None,
     ending_bankroll: float | None = None,
+    key: str = "main",
 ) -> bool:
     """Writes this week's Betting net/risked/wins/losses/pushes/expected
     wins (columns D, I, J, K, L, M) and Ending bankroll (column F) --
@@ -168,7 +200,7 @@ def write_season_betting_and_ending(
     `results_autofill.write_results_updates` uses for Cash Pts). Returns
     False if `week` has no matching row (nothing written)."""
     tab = cfg.tab
-    row = _find_week_row(client, tab, cfg, week)
+    row = _find_week_row(client, tab, cfg, week, key)
     if row is None:
         return False
     if betting_stats is not None:
@@ -232,14 +264,16 @@ class WeekClose:
     ending_bankroll: float | None
 
 
-def read_week_close(client: SheetsClient, bankroll: BankrollConfig, week: int) -> WeekClose:
+def read_week_close(
+    client: SheetsClient, bankroll: BankrollConfig, week: int, key: str = "main"
+) -> WeekClose:
     """Reads the ledger's weekly summary rows (Cash/GPP/Other), the Betting ledger (as
     `compute_weekly_betting_stats` numbers) and Ending Bankroll (B2), all unformatted. Used by `dfs week
     close` for the week it closes, and by `dfs week new` / the next `week close` to rewrite the PREVIOUS
     week's row: Sam edits a closed week's ledger after the close (Week 8: a $3 promo fee zeroed, a $10 win
     corrected to $12.50, the betting ledger settled), and the Season row taken at the close then disagrees
     with the next week's Starting Bankroll (the $16.33 gap, Plan D item 2)."""
-    totals = read_ledger_week_totals(client, bankroll.tab, week)
+    totals = read_ledger_week_totals(client, bankroll.tab, week, key)
     betting = None
     if bankroll.bets is not None:
         rows = client.read_range_unformatted(
@@ -272,14 +306,19 @@ def write_week_close(
     if not written:
         return False
     write_season_betting_and_ending(
-        client, cfg, close.totals.week, betting_stats=close.betting, ending_bankroll=close.ending_bankroll
+        client,
+        cfg,
+        close.totals.week,
+        betting_stats=close.betting,
+        ending_bankroll=close.ending_bankroll,
+        key=close.totals.key,
     )
     return True
 
 
-def read_season_row(client: SheetsClient, cfg: SeasonConfig, week: int) -> list:
-    """The week's Season row A:S, unformatted (empty when the tab has no row for it)."""
-    row = _find_week_row(client, cfg.tab, cfg, week)
+def read_season_row(client: SheetsClient, cfg: SeasonConfig, week: int, key: str = "main") -> list:
+    """The slate's Season row A:S, unformatted (empty when the tab has no row for it)."""
+    row = _find_week_row(client, cfg.tab, cfg, week, key)
     if row is None:
         return []
     rows = client.read_range_unformatted(cfg.tab, f"{WEEK_COLUMN}{row}:{LAST_VALUE_COLUMN}{row}")
@@ -375,3 +414,52 @@ def read_season_rows(client: SheetsClient, cfg: SeasonConfig) -> list[list]:
     return client.read_range_unformatted(
         cfg.tab, f"{WEEK_COLUMN}{cfg.first_row}:{LAST_VALUE_COLUMN}{cfg.last_row}"
     )
+
+
+def has_slate_rows(rows: list[list]) -> bool:
+    """True when Season rows (A first, as `dfs week new` reads them) hold a secondary slate row ("12 Thu")."""
+    from dfs import slate, slate_chain
+
+    for row in rows:
+        parsed = slate_chain.parse_label(row[0] if row else "")
+        if parsed is not None and parsed[1] != slate.MAIN:
+            return True
+    return False
+
+
+def carry_season(
+    source: SheetsClient, target: SheetsClient, cfg: SeasonConfig, *, other_columns: bool
+) -> tuple[int, list[str]]:
+    """`dfs week new`'s Season carry-forward when a slate row is involved (`slate_chain`): every secondary
+    slate's row the source has and the target lacks is inserted on the target first, in date order
+    (`sheet_season_view.insert_slate_row`), so both tabs hold the same labels in the same order; then the
+    value columns (`extract_season_value_columns`, never a formula column) are copied row for row. Returns the
+    rows copied and what was done. Raises `sheet_season_view.SeasonSlateRowError` when the two tabs' labels
+    still differ (nothing copied)."""
+    from dfs import slate_chain
+    from dfs.sheet_season_view import SeasonSlateRowError, insert_slate_row, label_rows
+
+    done: list[str] = []
+    src = label_rows(source, cfg.tab, cfg.first_row)
+    have = {slate_chain.parse_label(text) for _, text in label_rows(target, cfg.tab, cfg.first_row)}
+    for _, text in src:
+        if slate_chain.parse_label(text) not in have:
+            _, lines = insert_slate_row(target, cfg.tab, text, cfg.first_row)
+            done.extend(lines)
+    dst = label_rows(target, cfg.tab, cfg.first_row)
+    src_keys = [slate_chain.parse_label(t) for _, t in src]
+    if [slate_chain.parse_label(t) for _, t in dst] != src_keys:
+        found = ([t for _, t in src], [t for _, t in dst])
+        raise SeasonSlateRowError(f"{cfg.tab}: the rows differ after the inserts {found} -- nothing copied")
+    last_col = LAST_VALUE_COLUMN if other_columns else BETTING_EXPECTED_WINS_COLUMN
+    first, last = cfg.first_row, cfg.first_row + len(src) - 1
+    rows = source.read_range(cfg.tab, f"{WEEK_COLUMN}{first}:{last_col}{last}")
+    rows = (rows + [[] for _ in range(len(src))])[: len(src)]
+    updates = {}
+    for col_range, values in extract_season_value_columns(rows).items():
+        if col_range == f"{OTHER_NET_COLUMN}:{LAST_VALUE_COLUMN}" and not other_columns:
+            continue
+        start, _, end = col_range.partition(":")
+        updates[f"{start}{first}:{end or start}{last}"] = values
+    target.update_ranges(cfg.tab, updates)
+    return len(src), done

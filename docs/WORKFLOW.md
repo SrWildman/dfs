@@ -527,9 +527,10 @@ Saturdays late in the season, Christmas (a Friday). Each is a **slate key** name
 **Set it up once a week it happens.** Copy the template in Drive and name the copy "Week <n> <name>" (e.g.
 "Week 12 Thanksgiving"; a plain "Week <n>" is the main slate's and is refused), share it with the service
 account as an Editor, then `dfs week new --slate thu "<url>"`. That checks the copy (`dfs doctor`), writes
-`[slates.thu] sheet_id` to config.toml (the main slate's `sheet_id` is never touched), resets the copy's
-Suggested and synced tabs and clears the slate's local copies. No bankroll or Results carry: the money is the
-main sheet's.
+`[slates.thu] sheet_id` and `week` to config.toml (the main slate's `sheet_id` is never touched), carries the
+bankroll, Results and Season forward from the sheet right before it by date (Week 11's for Thanksgiving),
+gives its Season tab its own row ("12 Thu"), clears the copy's ledgers and lineups, resets its Suggested and
+synced tabs and clears the slate's local copies.
 
 **Run it like a main week, with `--slate thu`:** `dfs sync --slate thu` (the largest Classic draft group whose
 games all kick off on that week's Thursday; props are never pulled for it), `dfs lineups suggest --slate thu`,
@@ -539,15 +540,26 @@ first kickoff; the page's chat and buttons stay on that slate). `dfs status --sl
 thu` check it. Everything it writes goes to its own sheet and `data/slates/thu/`; the main slate's files never
 move and are never read by it.
 
-**What is the main slate's only.** Every other command refuses `--slate` (and `DFS_SLATE`) before it runs: the
-close, `results update`, `bankroll sync`, the contests engine, research, the model and the simulator commands.
+**Its own money.** Every slate is a ledger of its own, in date order: Week 11, then Week 12 Thanksgiving, then
+Week 12 main (`slate_chain.py`). Each has its own Bankroll tab, its own Season row and its own close, and each
+sheet's Starting Bankroll is the previous slate's Ending Bankroll. The weekly budget is each sheet's own (its
+Bankroll tab's Weekly Budget), and each slate's page shows its own entries against its own plan.
 
-**The close.** One `dfs week close` for the week, as always. It books every NFL entry of the week, both slates',
-once each in the Bankroll ledger and the contest log (the ledger and the contest plan count both). The learning
-is the main slate's: Results' Cash Pts and H2H leave the secondary slate's contests out, and its standings files
-are kept apart in `data/slates/thu/dk_standings/`, so the ownership log, the double-up line, the copies
-estimate, the cash post-mortem, edge at lock, the scorecards and Model Check never see them. The close prints
-one line per secondary slate saying so.
+**The close, one per slate.** `dfs week close --slate thu` books the entries whose contest is a Classic one
+starting on that slate's day into the Thanksgiving sheet's Bankroll and Season row ("12 Thu"), keeps its DK
+files (its standings apart, in `data/slates/thu/dk_standings/`) and prints its spend against its own plan. The
+main `dfs week close` leaves those entries out (each entry is booked once, in one ledger; Thanksgiving night's
+Showdown is the main week's) and first re-reads Thanksgiving's Ending into Week 12's Starting Bankroll. The
+learning is still the main slate's: Results' Cash Pts and H2H leave the secondary slate's contests out, and the
+ownership log, the double-up line, the copies estimate, the cash post-mortem, edge at lock, the scorecards and
+Model Check never see its standings.
+
+**Set Week 12 main up first if you like.** Its start is then Thanksgiving's start; once Thanksgiving is closed,
+`dfs bankroll carry` re-reads Thanksgiving's Ending into Week 12's start (with a read-back; `--dry-run` shows it
+first), and the Week 12 main close runs it on its own anyway.
+
+**What is the main slate's only.** Every other command refuses `--slate` (and `DFS_SLATE`) before it runs:
+`results update`, the contests engine, research, the model and the simulator commands.
 
 **If anything fails, play it by hand:** build on the slate's sheet (or in DraftKings) yourself; the main slate
 is untouched either way.

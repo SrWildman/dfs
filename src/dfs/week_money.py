@@ -117,7 +117,7 @@ def bankroll_chart(curve: list[dict], *, width: int = 640, height: int = 220) ->
     if len(curve) < 1:
         return ""
     left, right, top, bottom = 52, 96, 12, 26
-    weeks = [c["week"] for c in curve]
+    weeks = [c.get("x", c["week"]) for c in curve]  # a secondary slate's point sits before its week
     values = [c["cum"][k] for c in curve for k, _ in SERIES] + [0.0]
     lo, hi = min(values), max(values)
     pad = max((hi - lo) * 0.08, 5.0)
@@ -142,20 +142,22 @@ def bankroll_chart(curve: list[dict], *, width: int = 640, height: int = 220) ->
             f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end">{e(dollars(t))}</text>'
         )
     parts.append(f'<line class="zero" x1="{left}" x2="{width - right}" y1="{y(0):.1f}" y2="{y(0):.1f}"/>')
-    for wk in weeks:
+    for c in curve:
+        wk, name = c.get("x", c["week"]), str(c.get("label", c["week"]))
+        tick = f"Wk {name}" if name.isdigit() else name  # "Wk 12", or a secondary slate's "12 Thu"
         parts.append(
-            f'<text class="tick" x="{x(wk):.1f}" y="{height - 8}" text-anchor="middle">Wk {wk}</text>'
+            f'<text class="tick" x="{x(wk):.1f}" y="{height - 8}" text-anchor="middle">{e(tick)}</text>'
         )
     ends = []
     for key, label in SERIES:
-        pts = [(x(c["week"]), y(c["cum"][key]), c) for c in curve]
+        pts = [(x(c.get("x", c["week"])), y(c["cum"][key]), c) for c in curve]
         path = " ".join(f"{'M' if i == 0 else 'L'}{px:.1f},{py:.1f}" for i, (px, py, _) in enumerate(pts))
         cls = SERIES_CLASS[key]
         parts.append(f'<path class="line {cls}" d="{path}"/>')
         for px, py, c in pts:
             parts.append(
                 f'<circle class="pt {cls}" cx="{px:.1f}" cy="{py:.1f}" r="4"><title>{e(label)}, Week '
-                f"{c['week']}: "
+                f"{e(c.get('label', c['week']))}: "
                 f"{e(dollars(c['cum'][key]))} to date ({e(dollars(c['net'][key]))} that "
                 "week)</title></circle>"
             )
@@ -292,7 +294,7 @@ def bankroll_section(inp: WeekInputs) -> Section:
             share = c.get("spend_share")
             rows.append(
                 [
-                    e(c["week"]),
+                    e(c.get("label", c["week"])),
                     *(e(cents(c["net"][k])) for k in ("dfs", "betting", "other", "total")),
                     e(cents(c["ending"])) if c.get("ending") is not None else "-",
                     e(cents(c["risked"])),

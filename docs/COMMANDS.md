@@ -223,6 +223,7 @@ End-of-week bankroll reconciliation -- currently a thin wrapper over `dfs bankro
 | `--week INT` | Reconcile this week's ledger instead of the week the connected sheet's own title says it is. Only needed to hand-reconcile a specific week. |
 | `--research` | After the close, run the offline studies unattended and write one report, docs/research/weekly/<season>-wk<NN>-close.md: every week the four scorecards (a minute or two); on the first close of a month (or with --monthly) also research refresh, the stacks retro, the plays model's calls and their Flashback bans (under 45 minutes). Fail-soft: the close itself is already done. |
 | `--monthly` | With --research: also run the monthly studies, whatever the date. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs results update`
 
@@ -294,6 +295,16 @@ Classify contest entries into Cash/GPP and append new ones to the bankroll tab, 
 |---|---|
 | `--csv PATH` | Path to a DK contest-history CSV export (My Contests > export). Left out, the newest history export in your Downloads folder is used (found by its header row). |
 | `--week INT` | Reconcile this week's ledger instead of the week the connected sheet's own title says it is. Only needed to hand-reconcile a specific week. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
+
+### `dfs bankroll carry`
+
+Start this sheet's bankroll where the slate before it ended, by date: re-read that sheet's Ending Bankroll (and the PrizePicks and Underdog Endings) into this sheet's Starting cells, with a read-back.
+
+| Option | What it does |
+|---|---|
+| `--dry-run` | Say what would change; write nothing. |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
 ### `dfs bankroll stakes`
 

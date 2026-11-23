@@ -1,21 +1,20 @@
-"""The close of a week that had a secondary slate (`slate.py`; Thanksgiving first): its money is booked, its
-learning is kept out of the main slate's.
+"""The close of a week that had a secondary slate (`slate.py`; Thanksgiving first): its money is booked on its
+own sheet, its learning is kept out of the main slate's.
 
-**Money.** One `dfs week close` per week reads DraftKings' history export. Every NFL entry of the week, both
-slates', is booked once in the Bankroll ledger (by entry key, as always) and the contest log, so the ledger
-and the contest plan count both. Nothing here changes that.
+**Money** (`slate_chain`). Every slate is a ledger of its own: `dfs week close --slate thu` books the entries
+whose contest falls on that slate's day into the Thanksgiving sheet's Bankroll and its Season row ("12 Thu"),
+and the main close leaves them out, so each entry is booked once, in one ledger. The contest log (all of
+DraftKings' history, merged) still holds every entry.
 
-**Learning, main slate only.** A secondary slate's contests are the Classic contests of the week whose start
-falls on a secondary slate's day (`slate.contest_slate`, for the slates `config.toml` has a sheet for). They
-are kept out of:
+**Learning, main slate only.** A secondary slate's contests are the Classic contests whose start falls on a
+secondary slate's day of the week its sheet is for (`slate_chain.entry_slate`). They are kept out of:
 - `Results` (Cash Pts, H2H Entered / Win), the main slate's record (`main_slate_entries`);
 - the standings folder every learning step reads (`data/raw/dk_standings/`: the ownership log, the double-up
   line, the copies estimate, the cash post-mortem, Model Check's ownership, what won): their standings files
   are kept apart in `data/slates/<key>/dk_standings/` (`standings_divert`).
 The rest needs no change: the post-mortem reads the main slate's entries record, edge at lock and the
 scorecards read the main slate's DraftKings snapshots (`data/raw/draftkings/`, which a secondary slate never
-writes) and the decisions log is the main page's. None of them runs for a secondary slate: with three games
-and no history of its own there is nothing they can measure safely, so the close says so (`close_lines`).
+writes) and the decisions log is the main page's.
 
 With no `[slates.*]` in config.toml every function here is a no-op, and the close is exactly what it was.
 """
@@ -27,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from dfs import nfl_calendar, slate
+from dfs import slate
 from dfs.config import Config
 
 STANDINGS_SUBDIR = "dk_standings"
@@ -44,21 +43,18 @@ def standings_dir(key: str) -> Path:
     return slate.root(key) / STANDINGS_SUBDIR
 
 
-def main_slate_entries(entries: Sequence, cfg: Config, season: int, week: int | None) -> list:
-    """`entries` (`models.ContestEntry`) without the secondary slates' contests of Week `week` (other weeks
-    are
-    left exactly as they are)."""
+def main_slate_entries(
+    entries: Sequence, cfg: Config, season: int, week: int | None, weeks: dict[str, int] | None = None
+) -> list:
+    """`entries` (`models.ContestEntry`) without the secondary slates' contests. `weeks` is each secondary
+    slate's week (`slate_chain.slate_weeks`): with it, every week's are left out (closing Week 13 never puts
+    Thanksgiving's double-up back into Week 12's Results). Without it, as #95 did, only Week `week`'s."""
     keys = configured(cfg)
     if not keys or week is None:
         return list(entries)
-    out = []
-    for e in entries:
-        moment = getattr(e, "contest_date", None)
-        same_week = moment is not None and nfl_calendar.season_week_for_date(moment.date(), season) == week
-        if same_week and slate.contest_slate(moment, e.game_type, keys) is not None:
-            continue
-        out.append(e)
-    return out
+    from dfs import slate_chain
+
+    return slate_chain.for_slate(entries, slate.MAIN, season, weeks or {k: week for k in keys})
 
 
 def secondary_contests(history_csv: Path | None, keys: Sequence[str]) -> dict[str, str]:
@@ -123,11 +119,9 @@ def close_lines(cfg: Config, history_csv: Path | None, season: int, week: int | 
         n_files = len([p for p in kept.iterdir() if p.is_file()]) if kept.is_dir() else 0
         lines.append(
             f"The {slate.label(key)} slate, Week {week}: {len(rows)} entr{'y' if len(rows) == 1 else 'ies'}, "
-            f"${fees:,.2f} in fees, net {won - fees:+,.2f}: booked in the Bankroll ledger and the contest "
-            "log "
-            "with the main slate's. Its standings are kept apart "
-            f"({n_files} file(s) in {kept}); Results, the post-mortem, edge at lock, the scorecards and "
-            "every "
-            "model fit ran for the main slate only."
+            f"${fees:,.2f} in fees, net {won - fees:+,.2f}: left out of this sheet's ledger, booked on its "
+            f"own sheet by `dfs week close --slate {key}`. Its standings are kept apart ({n_files} file(s) "
+            f"in {kept}); Results, the post-mortem, edge at lock, the scorecards and every model fit ran for "
+            "the main slate only."
         )
     return lines
