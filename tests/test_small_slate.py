@@ -352,3 +352,38 @@ def test_the_run_line_names_what_a_small_slate_turns_off():
     assert "3-game slate" in small.line() and "cheap-pair" in small.line()
     on = cfg.model_copy(update={"small_slate": SmallSlateConfig(cheap_pair=True, hard_rules=True)})
     assert _small_slate(on).enforce_pair and not _small_slate(on).relax_rules
+
+
+# -- the GPP ownership meter --
+
+
+def test_the_gpp_meter_band_is_the_slate_s_own_on_a_small_slate_only():
+    from dfs import lineup_watch as lw
+
+    assert lw.field_own_sum([0.5, 0.5, None, float("nan"), -1]) == pytest.approx(0.5)
+    assert (
+        lw.gpp_band([0.3] * 10, "3-game slate") is lw.MAIN_BAND
+    )  # lighter than a main slate: the fixed band
+    heavy = lw.gpp_band([0.6] * 10, "3-game slate")  # field lineup 360%: 2.75x a main slate's
+    scale = 3.6 / lw.MAIN_FIELD_OWN_SUM
+    assert heavy.low == pytest.approx(lw.GPP_OWN_LOW * scale) and heavy.high == pytest.approx(
+        lw.GPP_OWN_HIGH * scale
+    )
+    assert lw.own_meter(3.70, "gpp", heavy) == "" and "over the 125%-145%" in lw.own_meter(3.70, "gpp")
+    assert lw.own_meter(5.0, "gpp", heavy).endswith("GPP target (3-game slate's own)")
+    assert lw.own_meter(5.0, "cash", heavy) == ""  # cash lineups still get no meter
+
+
+def test_the_band_for_a_frame_is_fixed_on_a_main_slate():
+    from dfs import lineup_watch as lw
+
+    small_rows = pd.DataFrame(slate_rows(THANKSGIVING, OWNS))
+    assert lw.band_for(small_rows) is lw.MAIN_BAND  # nothing synced: main
+    assert lw.band_for(None) is lw.MAIN_BAND and lw.band_for(small_rows.drop(columns="Own%")) is lw.MAIN_BAND
+    sync_draft_group(THANKSGIVING)
+    band = lw.band_for(small_rows)
+    assert band.slate == "3-game slate" and band.low > lw.GPP_OWN_LOW
+    assert band.low == pytest.approx(
+        lw.GPP_OWN_LOW * lw.field_own_sum(small_rows["Own%"]) / lw.MAIN_FIELD_OWN_SUM
+    )
+    assert lw.band_for(pd.DataFrame(slate_rows(MAIN_GAMES, OWNS))) is lw.MAIN_BAND

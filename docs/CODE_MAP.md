@@ -68,7 +68,8 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   the page's rows count as small only when that draft group is small and they cover that few games too
   (`frame_is_small`, `rows_cut`), so a fixture or a past main slate stays main. What it switches: the chalk cuts
   (`week_plays.slate_cut` on the page, `plays.make_calls(chalk=)` for the live calls, `small_slate.column_cut` for
-  EdgeRaw's `CHALK` flag and `chalk_watch`'s warnings), `field_own.attach(small=True)` and its shadow
+  EdgeRaw's `CHALK` flag and `chalk_watch`'s warnings; the GPP ownership meter's band,
+  `lineup_watch.band_for`), `field_own.attach(small=True)` and its shadow
   (`own_shadow.csv` beside the slate's synced files), the cheap-pair rule (`cash_pairs.choose(enforce=False)`),
   the builders' two hard rules (`late_swap_search.relaxed_rules`, read by `conflicts` and `build_milp`), the cash
   line's wording (`sim_inputs.SimLines.small`, `cash_core.Band.small`) and the page header
