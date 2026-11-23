@@ -266,7 +266,12 @@ def csv_row(season: int, c: Card) -> dict:
 
 
 def append_csv(path: Path, row: dict) -> None:
-    """Replace this season-week's row (a rerun) and keep the rest, sorted."""
+    """Replace this season-week's row (a rerun) and keep the rest, sorted. A secondary slate's file (its own,
+    `week_review._contests_dir`) carries its key."""
+    from dfs import slate
+
+    cols = slate.columns(CSV_COLUMNS)
+    row = slate.stamp(row)
     rows = []
     if path.exists():
         with path.open(newline="") as f:
@@ -275,11 +280,11 @@ def append_csv(path: Path, row: dict) -> None:
                 for r in csv.DictReader(f)
                 if (str(r["season"]), str(r["week"])) != (str(row["season"]), str(row["week"]))
             ]
-    rows.append({c: row.get(c, "") for c in CSV_COLUMNS})
+    rows.append({c: row.get(c, "") for c in cols})
     rows.sort(key=lambda r: (int(r["season"]), int(r["week"])))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
 

@@ -8,11 +8,12 @@ typed
 there works on the same slate). The CLI entry point (`prompt_missing.PromptingGroup.main`) reads it before the
 command runs and holds it for the whole command (`active`). Left out, it is `main`, and nothing changes.
 
-**Default deny.** Any command not in `SLATE_COMMANDS` refuses a secondary slate before it runs
-(`refusal`): `results update`, the research and model commands and the contests engine stay the main slate's
-alone, so nothing from a secondary slate can enter the main slate's records or model fits. The money is every
-slate's own (`slate_chain`): `week close`, `bankroll sync` and `bankroll carry` take a slate and book only its
-entries on its own sheet.
+**Every command takes it** (Sam, Nov 23: "It's a normal slate like anything else"). `PromptingGroup` gives
+every command a `--slate` option; only the season-long and login commands (`MAIN_ONLY`) refuse a secondary
+slate, since a slate means nothing to them. Each slate keeps its own records (below), and every record it
+writes carries its key (`SLATE_COLUMN`). The fitted models (the cash line offset, the ownership fits, the
+calls weights, the copies estimate, the calibration) are main's: they fit on main slates only unless config
+says `[learning] fit_secondary_slates = true` (`fit_keys`). The money is every slate's own (`slate_chain`).
 
 **Where a secondary slate's files go.** Under its own folder, `data/slates/<key>/` (`root`): its synced
 `current/` copies and `raw/` snapshots, its pools, builds (`suggest_state`), entries, late swap, Week page,
@@ -47,31 +48,12 @@ DAYS: dict[str, int] = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat":
 DAY_NAMES = {0: "Monday", 1: "Tuesday", 2: "Wednesday", 3: "Thursday", 4: "Friday", 5: "Saturday"}
 KEYS = (MAIN, *DAYS)
 
-# The commands that work on a secondary slate (their `--slate` option); every other command refuses one.
-SLATE_COMMANDS = frozenset(
-    {
-        "dfs status",
-        "dfs doctor",
-        "dfs sync",
-        "dfs export",
-        "dfs pool add",
-        "dfs pool remove",
-        "dfs pool list",
-        "dfs pool clear",
-        "dfs lineups suggest",
-        "dfs lineups late-swap",
-        "dfs lineups clear",
-        "dfs entries record",
-        "dfs entries fill",
-        "dfs entries print",
-        "dfs bankroll sync",
-        "dfs bankroll carry",
-        "dfs week close",
-        "dfs week new",
-        "dfs week page",
-        "dfs week serve",
-    }
-)
+# The commands a secondary slate means nothing to: the season-long leagues (their own sheet, `season.toml`)
+# and the logins. Every other command takes `--slate`.
+MAIN_ONLY: tuple[str, ...] = ("dfs season", "dfs auth")
+
+# Every record a slate writes carries its key, as this column (a CSV) or field (JSON).
+SLATE_COLUMN = "SlateKey"
 
 SLATE_HELP = (
     "Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by "
@@ -161,17 +143,20 @@ def command_path(command: str | None) -> str | None:
     return " ".join(w for w in command.split() if not w.startswith("-"))
 
 
+def main_only(command: str | None) -> bool:
+    """True for a command under `MAIN_ONLY` (`dfs season trades`, `dfs auth tffb`)."""
+    path = command_path(command) or ""
+    return any(path == p or path.startswith(p + " ") for p in MAIN_ONLY)
+
+
 def refusal(command: str | None, key: str) -> str | None:
-    """Why `command` will not run on slate `key`, or None when it may. `main` always may."""
-    if key == MAIN or command is None:
-        return None
-    path = command_path(command)
-    if path in SLATE_COMMANDS:
+    """Why `command` will not run on slate `key`, or None when it may. `main` always may; every command but
+    the `MAIN_ONLY` ones takes a secondary slate."""
+    if key == MAIN or command is None or not main_only(command):
         return None
     return (
-        f"`{path}` runs for the main slate only, so it does not run on the {label(key)} slate: nothing from "
-        "a "
-        f"secondary slate enters the main slate's records. Run it without --slate (and with {ENV_VAR} unset)."
+        f"`{command_path(command)}` has nothing to do with a DraftKings slate, so it does not take one (the "
+        f"{label(key)} slate was asked for). Run it without --slate (and with {ENV_VAR} unset)."
     )
 
 
@@ -191,6 +176,113 @@ def path(main_path: Path, *parts: str) -> Path:
     (`root() / parts`). The main path is passed in (not rebuilt) so main's paths stay exactly what they
     were."""
     return Path(main_path) if is_main() else root().joinpath(*parts)
+
+
+def data_path(main_path: Path, key: str | None = None) -> Path:
+    """A record's path for slate `key` (the active one by default): `main_path` itself on main; on a
+    secondary slate the same place under its folder (`data/contests/edge_at_lock.csv` ->
+    `data/slates/thu/contests/edge_at_lock.csv`). `main_path` is under `data/` (absolute, or the relative
+    `data/...` some modules use); one that is not raises SlateError rather than let a slate write a main
+    record."""
+    from dfs import paths
+
+    k = validate(key or _current)
+    p = Path(main_path)
+    if k == MAIN:
+        return p
+    for base in (paths.DATA_DIR, Path("data")):
+        try:
+            rel = p.relative_to(base)
+        except ValueError:
+            continue
+        if rel.parts[:1] == (SLATES_SUBDIR,):
+            return p  # already a slate's
+        return root(k) / rel
+    raise SlateError(f"{p} is not under data/: no place for the {label(k)} slate's copy of it.")
+
+
+def tag(frame, key: str | None = None):  # noqa: ANN001, ANN201 - a DataFrame
+    """`frame` with its `SlateKey` column (`SLATE_COLUMN`) set to `key` (the active slate by default). A main
+    record is left as it is: no column means main (`of`), so main's files keep today's shape."""
+    k = validate(key or _current)
+    return frame if k == MAIN else frame.assign(**{SLATE_COLUMN: k})
+
+
+def columns(names: list[str]) -> list[str]:
+    """A CSV's columns as a record writes them: `names`, plus `SlateKey` on a secondary slate (a main file
+    keeps today's columns)."""
+    return list(names) if is_main() else [*names, SLATE_COLUMN]
+
+
+def stamp(row: dict) -> dict:
+    """A record (a CSV row or a JSON line) with its slate key on a secondary slate; main's as it was."""
+    return dict(row) if is_main() else {**row, SLATE_COLUMN: _current}
+
+
+def configured_keys() -> list[str]:
+    """The secondary slates config.toml names (`[slates.<key>]`), sorted; [] when it cannot be read."""
+    try:
+        from dfs.config import load_base_config
+
+        return sorted((load_base_config().slates or {}).keys())
+    except Exception:  # noqa: BLE001 - no config (tests, a fresh checkout): no secondary slate
+        return []
+
+
+def fit_keys() -> list[str]:
+    """The slates the fitted models train on: `["main"]`, plus every configured secondary slate when
+    config.toml says `[learning] fit_secondary_slates = true` (Sam, Nov 23: "fit on main slates by
+    default"). Read whatever slate is active: a fit is one model, the main slate's."""
+    try:
+        from dfs.config import load_base_config
+
+        include = bool(load_base_config().learning.fit_secondary_slates)
+    except Exception:  # noqa: BLE001 - no config: main only
+        include = False
+    return [MAIN, *(configured_keys() if include else [])]
+
+
+def read_keys() -> list[str]:
+    """The slates whose records a reader sees: main's, the fitted slates' (`fit_keys`) and the active
+    slate's own. Main with no switch: `["main"]`, today's records exactly. A player plays one game a week, so
+    a secondary slate's rows of a week never repeat a main row of it."""
+    out = list(fit_keys())
+    if _current not in out:
+        out.append(_current)
+    return out
+
+
+def may_save_fit() -> bool:
+    """True when a refit run now may replace the saved model: always on main; on a secondary slate only when
+    its records are part of the fits (`fit_keys`), since otherwise the slate's own rows would move main's
+    model."""
+    return _current in fit_keys()
+
+
+def of(frame):  # noqa: ANN001, ANN201 - a DataFrame -> a Series
+    """Each row's slate: its `SlateKey` column, main where it is blank or missing (a main record has none)."""
+    import pandas as pd
+
+    if SLATE_COLUMN not in frame.columns:
+        return pd.Series(MAIN, index=frame.index, dtype=object)
+    col = frame[SLATE_COLUMN].astype(object)
+    return col.where(col.notna() & (col.astype(str).str.strip() != ""), MAIN).astype(str)
+
+
+def own_rows(frame, key: str | None = None):  # noqa: ANN001, ANN201 - DataFrames
+    """The rows of slate `key` (the active one by default)."""
+    return frame[of(frame) == validate(key or _current)]
+
+
+def fit_paths(main_path: Path) -> list[Path]:
+    """Every slate's copy of a record a fit reads (`fit_keys`), main's first, those that exist."""
+    out = [Path(main_path)]
+    for k in fit_keys():
+        if k != MAIN:
+            p = data_path(main_path, k)
+            if p.exists():
+                out.append(p)
+    return out
 
 
 # -- the slate's day -----------------------------------------------------------------------------------------

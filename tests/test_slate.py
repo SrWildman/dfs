@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -84,28 +85,27 @@ def test_the_slate_comes_from_the_option_or_the_environment():
         slate.from_args(["sync", "--slate", "sat"], env={slate.ENV_VAR: "thu"})
 
 
-# -- the default deny ----------------------------------------------------------------------------------------
+# -- every command takes a slate (Sam, Nov 23), but the season-long and login ones ---------------------------
 
 
 @pytest.mark.parametrize(
     "argv",
     [
-        # `week close` and `bankroll sync` take a slate now: each slate's money is booked on its own sheet
-        ["results", "update", "--slate", "thu"],
-        ["contests", "update", "--slate", "thu"],
+        ["season", "check", "--slate", "thu"],
+        ["auth", "tffb", "--slate", "thu"],
     ],
 )
-def test_a_main_only_command_refuses_a_secondary_slate_before_it_runs(argv):
+def test_a_season_long_or_login_command_refuses_a_secondary_slate_before_it_runs(argv):
     result = CliRunner().invoke(app, argv)
     assert result.exit_code == 1
-    assert "runs for the main slate only" in result.output
+    assert "has nothing to do with a DraftKings slate" in result.output
 
 
 def test_the_environment_is_enough_to_refuse(monkeypatch):
     monkeypatch.setenv(slate.ENV_VAR, "thu")
-    result = CliRunner().invoke(app, ["results", "update"])
+    result = CliRunner().invoke(app, ["season", "check"])
     assert result.exit_code == 1
-    assert "runs for the main slate only" in result.output
+    assert "has nothing to do with a DraftKings slate" in result.output
 
 
 def test_an_unknown_slate_is_an_error_not_main():
@@ -123,20 +123,60 @@ def _commands(group, prefix="dfs"):
             yield path, cmd
 
 
-def test_exactly_the_slate_commands_take_slate():
+def test_every_command_but_the_season_long_and_login_ones_takes_slate():
     import typer.main
 
     root = typer.main.get_command(app)
-    with_option = {path for path, cmd in _commands(root) if any("--slate" in p.opts for p in cmd.params)}
-    assert with_option == set(slate.SLATE_COMMANDS)
+    commands = dict(_commands(root))
+    with_option = {path for path, cmd in commands.items() if any("--slate" in p.opts for p in cmd.params)}
+    assert with_option == {path for path in commands if not slate.main_only(path)}
+    assert {"dfs results update", "dfs research close-report", "dfs contests update"} <= with_option
 
 
 def test_refusal_is_by_command_path():
     assert slate.refusal("dfs sync --live --slate", "thu") is None
     assert slate.refusal("dfs lineups suggest --iterate", "thu") is None
     assert slate.refusal("dfs week close --research", "main") is None
-    assert slate.refusal("dfs week close --research", "thu") is None  # every slate closes on its own sheet
-    assert "main slate only" in slate.refusal("dfs results update --all", "thu")
+    assert slate.refusal("dfs week close --research", "thu") is None
+    assert slate.refusal("dfs results update --all", "thu") is None
+    assert slate.refusal("dfs season trades --get RB", "main") is None
+    assert "nothing to do with a DraftKings slate" in slate.refusal("dfs season trades --get RB", "thu")
+
+
+def test_a_slates_record_lives_under_its_folder_and_main_keeps_its_path():
+    from dfs import paths
+
+    record = paths.DATA_DIR / "contests" / "edge_at_lock.csv"
+    assert slate.data_path(record) == record
+    assert (
+        slate.data_path(record, "thu") == paths.DATA_DIR / "slates" / "thu" / "contests" / "edge_at_lock.csv"
+    )
+    assert slate.data_path(Path("data/raw/dk_standings"), "thu") == slate.root("thu") / "raw" / "dk_standings"
+    with pytest.raises(slate.SlateError):
+        slate.data_path(Path("/elsewhere/x.csv"), "thu")
+
+
+def test_fits_are_main_only_unless_config_says_otherwise(tmp_path, monkeypatch):
+    from dfs import config as config_mod
+    from dfs import paths
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        '[google_sheets]\nsheet_id = "M"\ncredentials_file = "c.json"\n'
+        '[google_sheets.tab_mappings]\nedge = "EdgeRaw"\n[slates.thu]\nsheet_id = "T"\nweek = 12\n'
+    )
+    monkeypatch.setattr(config_mod, "CONFIG_FILE", cfg)
+    config_mod.load_base_config.cache_clear()
+    assert slate.fit_keys() == ["main"]
+    cfg.write_text(cfg.read_text() + "[learning]\nfit_secondary_slates = true\n")
+    config_mod.load_base_config.cache_clear()
+    assert slate.fit_keys() == ["main", "thu"]
+    record = paths.DATA_DIR / "ownership_log.csv"
+    assert slate.fit_paths(record) == [record]  # the slate's copy does not exist yet
+    slate.data_path(record, "thu").parent.mkdir(parents=True)
+    slate.data_path(record, "thu").write_text("x")
+    assert slate.fit_paths(record) == [record, slate.data_path(record, "thu")]
+    config_mod.load_base_config.cache_clear()
 
 
 # -- the config ----------------------------------------------------------------------------------------------

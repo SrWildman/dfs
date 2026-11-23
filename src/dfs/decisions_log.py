@@ -72,6 +72,9 @@ def next_id(season: int, week: int, path: Path | None = None) -> str:
 
 
 def _write(item: dict, path: Path | None) -> None:
+    from dfs import slate
+
+    item = slate.stamp(item)  # a secondary slate's decisions carry its key
     p = _path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as f:

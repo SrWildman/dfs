@@ -25,7 +25,7 @@ from pathlib import Path
 import pandas as pd
 
 from dfs import contests_cash_line as cash_line
-from dfs import nfl_calendar, ownership
+from dfs import nfl_calendar, ownership, slate
 from dfs.config import Config
 from dfs.contests import analysis, capture, slate_index, standings, week_frames
 from dfs.paths import CONTESTS_DIR, DK_HISTORY_DIR, DK_STANDINGS_DIR, OWNERSHIP_LOG_FILE, RAW_DIR
@@ -63,7 +63,7 @@ def resolve_history(csv: Path | None, downloads: Path) -> tuple[Path | None, str
 def log_ownership(result: analysis.Analysis, standings_dir: Path | None = None) -> tuple[int, int]:
     """Logs the actual ownership of every kept standings file whose contest is not yet in the ownership log
     (or is there under another week). Returns `(contests logged, contests already right)`."""
-    standings_dir = Path(standings_dir) if standings_dir is not None else DK_STANDINGS_DIR
+    standings_dir = Path(standings_dir) if standings_dir is not None else slate.data_path(DK_STANDINGS_DIR)
     if result.profiles.empty or not standings_dir.is_dir():
         return 0, 0
     weeks = {
@@ -72,8 +72,9 @@ def log_ownership(result: analysis.Analysis, standings_dir: Path | None = None) 
         if pd.notna(r.season) and pd.notna(r.week)
     }
     have: dict[str, tuple[int, int]] = {}
-    if OWNERSHIP_LOG_FILE.exists():
-        existing = pd.read_csv(OWNERSHIP_LOG_FILE, dtype={"contest_id": str})
+    log_file = slate.data_path(OWNERSHIP_LOG_FILE)
+    if log_file.exists():
+        existing = pd.read_csv(log_file, dtype={"contest_id": str})
         have = {
             cid: (int(sub["season"].iloc[0]), int(sub["week"].iloc[0]))
             for cid, sub in existing.groupby("contest_id")
@@ -137,6 +138,9 @@ def run_contests(
 
         divert = slate_close.standings_divert(cfg, history_csv)
         got = capture.capture_standings(downloads, DK_STANDINGS_DIR, divert)
+        tagged = slate_close.tag_log(cfg, CONTESTS_DIR / analysis.LOG_NAME, season)
+        if tagged:
+            say(f"  contest log: {tagged} entr{'y' if tagged == 1 else 'ies'} tagged with a secondary slate")
         for line in capture.describe(got):
             say(line)
     except OSError as e:
@@ -144,14 +148,19 @@ def run_contests(
 
     if history_csv is None:
         return report
+    # A secondary slate's engine reads its own standings and DraftKings files, writes its own tables under
+    # its folder and sees its own entries; the contest log is the account's one record (`slate_close`).
+    standings_dir = slate.data_path(DK_STANDINGS_DIR)
     try:
         result = analysis.run(
             [history_csv],
-            CONTESTS_DIR,
-            standings_dir=DK_STANDINGS_DIR if DK_STANDINGS_DIR.is_dir() else None,
-            frames=lambda s, w: week_frames.week_frame(RAW_DIR / "draftkings", s, w),
+            slate.data_path(CONTESTS_DIR),
+            standings_dir=standings_dir if standings_dir.is_dir() else None,
+            frames=lambda s, w: week_frames.week_frame(slate.data_path(RAW_DIR) / "draftkings", s, w),
             me=_me(),
             fetch_season=fetch_season,
+            log_path=CONTESTS_DIR / analysis.LOG_NAME,
+            keep=lambda log: _own_entries(cfg, log, season),
         )
         analysis.write(result)
     except Exception as e:  # noqa: BLE001 - the close already succeeded; report and carry on
@@ -161,6 +170,8 @@ def run_contests(
     for merged in result.merges:
         m = merged[1]
         say(f"Contest log: {m.added} new, {m.updated} updated entries -> {m.total} in data/contests/.")
+    if not slate.is_main():
+        say(f"The {slate.label()} slate's tables: {len(result.typed)} of its entries, in {result.out_dir}.")
     say(f"Profiles: {len(result.profiles)} standings file(s); {len(result.lineup_errors)} blank lineups.")
     for line in analysis.summary_lines(result):
         if line.startswith(("warning:", "players for", "  ")) or "unmatched" in line:
@@ -190,7 +201,7 @@ def run_contests(
     try:
         from dfs import sheet_contests
 
-        tables = sheet_contests.load_tables(CONTESTS_DIR)
+        tables = sheet_contests.load_tables(slate.data_path(CONTESTS_DIR))
         layout = sheet_contests.build_layout(tables, season)
         say(sheet_contests.write_contests(client, layout, cfg.contests.tab))
     except Exception as e:  # noqa: BLE001
@@ -247,14 +258,48 @@ def log_pool_hits(cfg: Config, client: SheetsClient, result: analysis.Analysis, 
     )
     if row is None:
         return f"Pool hit rate: Week {week} has no scored players with a CalPts."
-    path = CONTESTS_DIR / POOL_HITS_FILE
+    path = slate.data_path(CONTESTS_DIR) / POOL_HITS_FILE
     old = pd.read_csv(path) if path.exists() and path.stat().st_size else pd.DataFrame(columns=list(row))
     old = old[~((old["season"] == season) & (old["week"] == week))]
-    pd.concat([old, pd.DataFrame([row])], ignore_index=True).to_csv(path, index=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.concat([old, slate.tag(pd.DataFrame([row]))], ignore_index=True).to_csv(path, index=False)
     return (
         f"Pool hit rate, Week {week}: {row['pooled_hits']} of {row['pooled']} pooled players beat CalPts; "
         f"{row['likes_hits']} of {row['likes']} model favourites left out."
     )
+
+
+def _own_entries(cfg: Config, log: pd.DataFrame, season: int) -> pd.DataFrame:
+    """The contest log's rows this slate's engine reads: a secondary slate's own entries; on main, every
+    entry but the secondary slates' (`slate_chain.log_for_slate`; the whole log with no `[slates.*]` and no
+    tag, exactly as before). The fits it makes (toughness, the h2h bands) are main's unless `[learning]`
+    includes the slates (`slate.fit_keys`)."""
+    from dfs import slate_chain
+
+    keys = slate.read_keys()
+    if keys == [slate.MAIN] and slate.SLATE_COLUMN not in log.columns and not slate_close_configured(cfg):
+        return log
+    weeks = _slate_weeks(cfg)
+    parts = [slate_chain.log_for_slate(log, k, season, weeks) for k in keys]
+    return pd.concat(parts).sort_index() if len(parts) > 1 else parts[0]
+
+
+def slate_close_configured(cfg: Config) -> bool:
+    from dfs import slate_close
+
+    return bool(slate_close.configured(cfg))
+
+
+def _slate_weeks(cfg: Config) -> dict[str, int]:
+    """Each configured secondary slate's week (`[slates.<key>] week`); a slate without one is left out (its
+    entries are then told apart by the log's tag alone)."""
+    from dfs.config import load_base_config
+
+    try:
+        slates = load_base_config().slates or {}
+    except Exception:  # noqa: BLE001 - no config: no secondary slate
+        return {}
+    return {k: int(v.week) for k, v in slates.items() if v.week is not None}
 
 
 def _me() -> str:

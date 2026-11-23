@@ -47,7 +47,11 @@ _STAMP = re.compile(r"^(\d{8}T\d{6})Z\.csv$")
 
 
 def edge_snapshot_before(week: int, season: int = SEASON, folder: Path = EDGE_DIR) -> tuple[Path, datetime]:
-    """The last EdgeRaw snapshot taken before the week's Sunday lock, and its UTC time."""
+    """The last EdgeRaw snapshot taken before the week's Sunday lock, and its UTC time (a secondary slate's
+    own snapshots and lock while it is active, `slate.data_path`)."""
+    from dfs import slate
+
+    folder = slate.data_path(folder)
     lock = week_frames.lock_utc(season, week)
     best = None
     for path in sorted(folder.glob("*.csv")):
@@ -184,7 +188,11 @@ def load_contests(
 ) -> list[ContestField]:
     """Every Classic contest under the standings folder (bare CSVs and zips; optionally one week), with the
     history log's size, series and places paid; a contest the log lacks takes `extra_meta` (see
-    `entries_file_meta`), with `places_paid` 0 (unknown: its `cash` finish is then always False)."""
+    `entries_file_meta`), with `places_paid` 0 (unknown: its `cash` finish is then always False). A secondary
+    slate reads its own standings folder (`slate.data_path`)."""
+    from dfs import slate
+
+    folder = slate.data_path(folder)
     log = pd.read_csv("data/contests/contest_log.csv", low_memory=False)
     log = log[log["Season"] == SEASON]
     out = []

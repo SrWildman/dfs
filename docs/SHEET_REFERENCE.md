@@ -1023,6 +1023,12 @@ and the three team-colour columns (H/I/J) stay yours to maintain by hand;
 `write_results_updates` never touches them, and never blanks `Cash Pts`
 for a week that hasn't finished scoring yet.
 
+**A secondary slate's row.** A week with a second slate (Thanksgiving) gets a Results row of its own, labelled
+`12 Thu`, inserted in date order between `11` and `12` by a real row insert, with the week rows' two formulas;
+the averages row's ranges grow to take it in. Its slate's close fills it from that slate's own entries; `dfs
+week new` carries it forward by label (`results_rows.copy_rows`), and a later close re-reads it from the slate's
+own sheet. Rows are found by their label in `A`, never by a row number (`results_rows.label_rows`).
+
 ### Header notes (one-hover definitions)
 
 The newer columns carry a plain-English definition as a **cell note on their header** (hover the little corner

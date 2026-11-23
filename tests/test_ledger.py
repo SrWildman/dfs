@@ -359,6 +359,6 @@ def test_h2h_is_asked_only_at_a_terminal_with_h2h_entries_and_never_when_piped(m
 def test_the_close_saves_the_ledger_and_the_h2h_log_and_never_fails_over_them(monkeypatch, capsys):
     from dfs import cli
 
-    cli._h2h_log_after_close(2026, 9)  # no log under a test data dir is fine: a yellow line at most
+    cli._h2h_log_after_close(None, 2026, 9)  # no config, no log under a test data dir is fine: a yellow line at most
     cli._save_ledger(object(), 2026, 9, through=9)  # no config at all: prints a warning, does not raise
     assert "not saved" in capsys.readouterr().out

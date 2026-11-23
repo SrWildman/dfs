@@ -16,10 +16,10 @@ step that fits right now marked `>`. It asks for anything a command needs
 
 ---
 
-**"runs for the main slate only, so it does not run on the thu slate".**
-Cause: the command was given `--slate thu`, or it ran where `DFS_SLATE=thu` is set (a terminal you set it in, or
-the Thanksgiving page's chat and buttons from `dfs week serve --slate thu`). Only the commands a second slate needs
-take a slate (`slate.SLATE_COMMANDS`); the close, results, research and the contests engine are the main slate's.
+**"`dfs season ...` has nothing to do with a DraftKings slate, so it does not take one".**
+Cause: a season-long or login command (`dfs season`, `dfs auth`; `slate.MAIN_ONLY`) was given `--slate thu`, or
+ran where `DFS_SLATE=thu` is set (a terminal you set it in, or the Thanksgiving page's chat and buttons from `dfs
+week serve --slate thu`). Every other command takes a slate.
 Fix: run it from a plain terminal without `--slate` (`unset DFS_SLATE` if you set it).
 
 ---

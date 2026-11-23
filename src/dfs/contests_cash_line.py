@@ -71,11 +71,16 @@ def _letter(index: int) -> str:
 
 
 def fill_cash_lines(client, results: ResultsConfig, lines: dict[int, float]) -> CashLineResult:
-    """Writes each cash line into a BLANK Results `Cash Line` cell (found by header); reports the rest."""
+    """Writes each cash line into a BLANK Results `Cash Line` cell (found by header); reports the rest. A
+    week's row is the active slate's (`slate_chain.season_label`: "12" on main, "12 Thu" on Thanksgiving's
+    sheet)."""
+    from dfs import results_rows, slate, slate_chain
+
     result = CashLineResult()
     if not lines:
         return result
-    rows = client.read_range_unformatted(results.tab, f"A{results.header_row}:Z{results.last_row}")
+    last = results.last_row + results_rows.LABEL_SPARE  # past any slate row ("12 Thu") inserted above week 18
+    rows = client.read_range_unformatted(results.tab, f"A{results.header_row}:Z{last}")
     header = [str(c).strip() for c in (rows[0] if rows else [])]
     if WEEK_HEADER not in header or CASH_LINE_HEADER not in header:
         raise ValueError(f"{results.tab} has no {WEEK_HEADER!r} / {CASH_LINE_HEADER!r} header to find")
@@ -83,11 +88,12 @@ def fill_cash_lines(client, results: ResultsConfig, lines: dict[int, float]) -> 
     row_of: dict[int, tuple[int, object]] = {}
     for offset, row in enumerate(rows[1:]):
         cell = row[week_col] if week_col < len(row) else ""
-        if isinstance(cell, float) and cell.is_integer():
-            cell = int(cell)
-        if str(cell).strip().isdigit():
+        parsed = slate_chain.parse_label(cell)
+        if parsed is None:
+            break  # the blank row under the last week
+        if parsed[1] == slate.current():
             current = row[line_col] if line_col < len(row) else ""
-            row_of[int(str(cell).strip())] = (results.header_row + 1 + offset, current)
+            row_of[parsed[0]] = (results.header_row + 1 + offset, current)
     updates: dict[str, list[list]] = {}
     for week, found in sorted(lines.items()):
         if week not in row_of:

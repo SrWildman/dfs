@@ -133,14 +133,19 @@ def read_csv(path: Path) -> list[dict]:
 
 
 def replace_week(path: Path, season: int, week: int, rows: list[dict]) -> None:
-    """Write `rows` as that season-week's (a rerun replaces them); other weeks are kept."""
+    """Write `rows` as that season-week's (a rerun replaces them); other weeks are kept. A secondary slate's
+    file carries its key."""
+    from dfs import slate
+
+    cols = slate.columns(CASH_COLUMNS)
+    rows = [slate.stamp(r) for r in rows]
     kept = [
         r for r in read_csv(path) if (str(r.get("season")), str(r.get("week"))) != (str(season), str(week))
     ]
-    allrows = kept + [{c: r.get(c, "") for c in CASH_COLUMNS} for r in rows]
+    allrows = kept + [{c: r.get(c, "") for c in cols} for r in rows]
     allrows.sort(key=lambda r: (int(r["season"]), int(r["week"]), str(r["label"])))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=CASH_COLUMNS)
+        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         w.writerows(allrows)

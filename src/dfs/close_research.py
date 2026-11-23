@@ -307,7 +307,12 @@ def first_close_of_month(season: int, week: int) -> bool:
 
 def stages_for(season: int, week: int, *, monthly: bool = False) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """(weekly, monthly) stages for this close: the monthly set is empty unless `monthly` or the first close
-    of the month."""
+    of the month. A secondary slate's close runs the weekly set (its own four scorecards) alone: the monthly
+    studies refit main's models (`slate.fit_keys`)."""
+    from dfs import slate
+
+    if not slate.is_main():
+        return WEEKLY, ()
     return WEEKLY, (MONTHLY if monthly or first_close_of_month(season, week) else ())
 
 
@@ -351,7 +356,10 @@ def run_stage(name: str, season: int, week: int, out: Path) -> int:
 
 
 def run_dir(season: int, week: int) -> Path:
-    return RUN_DIR / f"{season}-wk{week:02d}"
+    """`data/research/close/<season>-wkNN/`, or a secondary slate's own (`slate.data_path`)."""
+    from dfs import slate
+
+    return slate.data_path(RUN_DIR) / f"{season}-wk{week:02d}"
 
 
 def close_text_path(season: int, week: int) -> Path:
@@ -477,15 +485,22 @@ def run_stages(
 
 
 def report_path(season: int, week: int, directory: Path | None = None) -> Path:
-    return (directory or REPORT_DIR) / f"{season}-wk{week:02d}-close.md"
+    """`<season>-wkNN-close.md`; a secondary slate's report is its own, `<season>-wkNN-thu-close.md`."""
+    from dfs import slate
+
+    tag = "" if slate.is_main() else f"-{slate.current()}"
+    return (directory or REPORT_DIR) / f"{season}-wk{week:02d}{tag}-close.md"
 
 
 def previous_report(season: int, week: int, directory: Path | None = None) -> tuple[Path, dict] | None:
     """The newest close report of the season for a week before `week`, with the metrics it embeds."""
+    from dfs import slate
+
     directory = directory or REPORT_DIR
+    tag = "" if slate.is_main() else f"-{slate.current()}"  # each slate against its own earlier report
     found = []
-    for path in directory.glob(f"{season}-wk*-close.md") if directory.exists() else []:
-        match = re.search(r"-wk(\d+)-close\.md$", path.name)
+    for path in directory.glob(f"{season}-wk*{tag}-close.md") if directory.exists() else []:
+        match = re.search(rf"-wk(\d+){tag}-close\.md$", path.name)
         if match and int(match.group(1)) < week:
             found.append((int(match.group(1)), path))
     for _w, path in sorted(found, reverse=True):
@@ -677,7 +692,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - the child 
     stage.add_argument("--week", type=int, required=True)
     stage.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
-    return run_stage(args.name, args.season, args.week, args.out)
+    from dfs import slate
+
+    with slate.active(os.environ.get(slate.ENV_VAR)):  # the parent's slate (`slate.active` sets the variable)
+        return run_stage(args.name, args.season, args.week, args.out)
 
 
 if __name__ == "__main__":  # pragma: no cover

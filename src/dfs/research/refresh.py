@@ -102,7 +102,7 @@ def latest_scored_week(season: int) -> int | None:
     from dfs import results_loop
 
     weeks = []
-    for path in results_loop.RESULTS_DIR.glob(f"scored_{season}_w*.csv"):
+    for path in results_loop.results_dir().glob(f"scored_{season}_w*.csv"):
         match = re.search(r"_w(\d+)\.csv$", path.name)
         if match:
             weeks.append(int(match.group(1)))

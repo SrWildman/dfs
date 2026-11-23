@@ -47,6 +47,8 @@ downstream is waiting on it any more.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 from dfs.paths import OWNERSHIP_LOG_FILE, ensure_data_dirs
@@ -102,13 +104,20 @@ def parse_ownership_export(df: pd.DataFrame) -> pd.DataFrame:
     ]
 
 
+def log_file() -> Path:
+    """`data/ownership_log.csv`, or a secondary slate's own (`slate.data_path`)."""
+    from dfs import slate
+
+    return slate.data_path(OWNERSHIP_LOG_FILE)
+
+
 def already_logged_contest_ids() -> set[str]:
     """Contest IDs already in the durable ownership log -- lets a caller
     skip a contest it's already logged (e.g. if it ever tries to loop
     over a directory of files)."""
-    if not OWNERSHIP_LOG_FILE.exists():
+    if not log_file().exists():
         return set()
-    existing = pd.read_csv(OWNERSHIP_LOG_FILE, dtype={"contest_id": str})
+    existing = pd.read_csv(log_file(), dtype={"contest_id": str})
     return set(existing["contest_id"])
 
 
@@ -120,18 +129,22 @@ def append_ownership(rows: pd.DataFrame, *, season: int, week: int, contest_id: 
     duplicates (the same "replace by key, don't just append" discipline
     `sheet_pool_control`'s own accumulator uses, applied to a local file
     instead of a sheet column)."""
+    from dfs import slate
+
     ensure_data_dirs()
     stamped = rows.copy()
     stamped["season"] = season
     stamped["week"] = week
     stamped["contest_id"] = str(contest_id)
-    stamped = stamped[OWNERSHIP_LOG_COLUMNS]
+    stamped = slate.tag(stamped[OWNERSHIP_LOG_COLUMNS])  # a secondary slate's rows carry its key
 
-    if OWNERSHIP_LOG_FILE.exists():
-        existing = pd.read_csv(OWNERSHIP_LOG_FILE, dtype={"contest_id": str})
+    path = log_file()
+    if path.exists():
+        existing = pd.read_csv(path, dtype={"contest_id": str})
         existing = existing[existing["contest_id"] != str(contest_id)]
         combined = pd.concat([existing, stamped], ignore_index=True)
     else:
         combined = stamped
-    combined.to_csv(OWNERSHIP_LOG_FILE, index=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    combined.to_csv(path, index=False)
     return len(stamped)

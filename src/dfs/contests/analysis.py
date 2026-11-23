@@ -166,14 +166,21 @@ def run(
     index_file: Path | None = None,
     fetch_season: Callable[[int], pd.DataFrame] | None = slate_index.compute_season,
     frames: Callable[[int, int], tuple[pd.DataFrame | None, str]] | None = None,
+    log_path: Path | None = None,
+    keep: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
 ) -> Analysis:
+    """`log_path` is the contest log the history merges into (`out_dir`'s own by default; a secondary slate's
+    engine merges into the account's one log and writes its tables under its folder). `keep` narrows the log
+    the analyses read (a slate's own entries, `contests_close._own_entries`)."""
     out_dir = Path(out_dir)
     result = Analysis(out_dir=out_dir)
-    log_path = out_dir / LOG_NAME
+    log_path = Path(log_path) if log_path is not None else out_dir / LOG_NAME
 
     for path in history_files:
         result.merges.append((str(path), history.merge_into(log_path, path, me=me)))
     result.log = history.read_log(log_path)
+    if keep is not None:
+        result.log = keep(result.log).reset_index(drop=True)
     result.typed = history.typed(result.log)
     result.series_table = series_summary(result.typed) if len(result.typed) else pd.DataFrame()
     result.disagreements = series_mod.crosscheck(result.log)
