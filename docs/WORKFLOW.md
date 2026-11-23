@@ -557,7 +557,8 @@ a playoff Sunday's main slate included; `[small_slate]`). Its sync takes TFFB's 
 TFFB posts it, usually two days before), and the page's header says "3-game slate" with one line on what changes:
 chalk is the slate's own top 10% of double-up ownership instead of a flat 30%, the cheap-pair rule and the builders'
 one RB a game / no DST against his QB are off (the pair is still flagged), the cash line is "not calibrated" (it was
-fitted on main slates), and each GPP build's copies and salary left are listed. The math is in `docs/CALCULATIONS.md`
+fitted on main slates), the GPP ownership meter's band moves with the slate's own ownership (so a heavy
+slate doesn't call every lineup chalky), and each GPP build's copies and salary left are listed. The math is in `docs/CALCULATIONS.md`
 "Small slates".
 
 ## The Week page as an app: `dfs week serve`

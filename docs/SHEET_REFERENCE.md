@@ -666,7 +666,7 @@ lock then, and the later windows). Seven blocks, most urgent first:
    `late_swap_store.STALE_AFTER`), or a game that locked since the run is shown as `LOOK` ("re-run late-swap"), never as current. Fully locked lineups collapse to one line (`L1-L3 L6`). The note
    gives the run's time.
 3. **Weather.** The games of your open slots, windy first (`WIND` flag at `derived.WIND_FLAG_THRESHOLD_MPH`), wind, roof, your slots, kickoff.
-4. **Lineup warnings.** The Lineups tab's checks in one list: players in more than half of your lineups (`lineup_watch.overused`, five listed), the GPP ownership meter (`lineup_watch.own_meter`, GPP-marked lineups only),
+4. **Lineup warnings.** The Lineups tab's checks in one list: players in more than half of your lineups (`lineup_watch.overused`, five listed), the GPP ownership meter (`lineup_watch.own_meter`, GPP-marked lineups only; on a small slate the slate's own band, `lineup_watch.band_for`),
    and heavy chalk in none of your cash / GPP lineups (`chalk_watch.missing_chalk`; a blank marker counts as cash).
 5. **Exposure, top 10.** Most-held players across built lineups: lineups, share, the Exposure tab's typed Target (read only), Own%, CalPts.
 6. **DK Upload.** Entries without a Lineup picked (`FILL`, with the format and fee mix), entries pointing at a lineup that is not built. Nothing is picked or assigned for you.

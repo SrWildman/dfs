@@ -524,8 +524,9 @@ def _warnings_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup]
         any_line = True
     if len(over) > OVERUSE_LISTED:
         b.line(CUE_LOOK, "Overused", f"and {len(over) - OVERUSE_LISTED} more players in over half of them")
+    band = lw.band_for(edge)
     for lineup in built:
-        msg = lw.own_meter(lineup.own, _goal(lineup.marker))
+        msg = lw.own_meter(lineup.own, _goal(lineup.marker), band)
         if msg:
             b.line(CUE_LOOK, "GPP meter", f"L{lineup.number}: {msg}")
             any_line = True
@@ -550,7 +551,9 @@ def _warnings_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup]
         b.line(CUE_OK, "Nothing flagged.")
     b.note(
         f"Overused = in more than {lw.OVERUSE_SHARE:.0%} of {lw.MIN_LINEUPS}+ lineups. The meter judges only "
-        f"GPP-marked lineups ({lw.GPP_OWN_LOW:.0%}-{lw.GPP_OWN_HIGH:.0%} summed Own%). Chalk is projected "
+        f"GPP-marked lineups ({band.low:.0%}-{band.high:.0%} summed Own%"
+        f"{', ' + band.slate if band.slate else ''}). "
+        "Chalk is projected "
         f"Own% of {cw.CASH_PROJECTED_OWN:.0%}+ (cash set) or {cw.GPP_PROJECTED_OWN:.0%}+ (GPP set) "
         "in none of the set."
     )

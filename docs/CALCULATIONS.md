@@ -2664,6 +2664,12 @@ everywhere below.
 - **The cash line.** The same mechanics (the field average from the slate's own ownership, +`double_up_offset`), so the
   builds still have a line to score against, but it is said to be **not calibrated**: the offset was fitted on main slates.
   The Default's band has no word on a small slate ("small slate: line not calibrated; cash builds have cashed N of M").
+- **The GPP ownership meter** (`lineup_watch`; the `lineups suggest` warnings and the Cockpit's lineup warnings). On a
+  main slate a GPP-marked lineup is warned outside 125%-145% summed `Own%`, a band around the field's average lineup
+  (`field_own_sum` = `sum(Own%^2)`: 0.97-1.68 on the 2026 main slates, median `MAIN_FIELD_OWN_SUM` = 1.31). On a small
+  slate the band is the slate's own: both ends times `field_own_sum / 1.31`, never under the fixed band (`gpp_band`),
+  and the warning says "(3-game slate's own)". Week 11's 3-game afternoon slate: field lineup 270%, band 258%-299%.
+  The Lineups tab's `Issues` token is a sheet formula and keeps the fixed band.
 - **Copies.** The same ownership-product estimate (`sim/dups.py`, fitted on main-slate standings), so it rises with the
   slate's ownership; each GPP build's copies and salary left are listed on the run ("a dupe lever": information, never a
   rule). Untested on small slates.

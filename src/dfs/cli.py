@@ -3549,10 +3549,11 @@ def _lineup_set_warnings(edge: pd.DataFrame, built: list[tuple[list[str], str]])
     if own is None:
         return
     by_name = dict(zip(edge["Name"], own, strict=True))
+    band = lw.band_for(edge)
     for number, (names, goal) in enumerate(built, start=1):
         shares = [by_name.get(n) for n in names if n]
         if len(shares) == 9 and all(s is not None and s == s for s in shares):
-            msg = lw.own_meter(sum(shares), goal)
+            msg = lw.own_meter(sum(shares), goal, band)
             if msg:
                 console.print(escape(f"Built lineup {number}: {msg}."), style="yellow", highlight=False)
 
