@@ -214,12 +214,21 @@ def describe_entries(
         )
     warnings = []
     found = entered.file_week(parsed.players)
+    if found is None and entered.on_synced_slate(parsed.players, entered.synced_rows()):
+        found = (season, week)  # after lock: no kickoff times, but this week's players (`entered`)
     if found != (season, week):
         seen = f"Week {found[1]} of {found[0]}" if found and found[1] else "no week"
         warnings.append(
             f"This file is for {seen}, not Week {week} of {season}: `entries record` will refuse it."
         )
 
+    previous = entered.load(season, week)
+    if previous is not None and found == (season, week):
+        summary.append(
+            f"recording it replaces this week's record of {previous.recorded_at} "
+            f"({len(previous.lineups)} lineup{'s' if len(previous.lineups) != 1 else ''}) with these; "
+            "the earlier one is kept"
+        )
     pairs = [(e.contest_name, ent.entry_format(e), money(e.entry_fee)) for e in parsed.entries]
     avoid = [] if opponents is None else _avoid_names(opponents)
     history_sizes = contest_tiers.history_by_series(typed) if typed is not None and len(typed) else {}

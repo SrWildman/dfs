@@ -575,3 +575,48 @@ def test_the_export_leaves_blank_entries_out_instead_of_failing_on_them():
 def test_the_dk_upload_header_still_starts_with_dks_own_columns():
     assert DK_UPLOAD_SHEET_HEADER[: len(DK_UPLOAD_HEADER)] == DK_UPLOAD_HEADER
     assert DK_UPLOAD_SHEET_HEADER[len(DK_UPLOAD_HEADER) :] == ("Format", "Lineup", "Suggested", "Why")
+
+
+# -- after lock (Sam's Week 11 note) -------------------------------------------------------------------------
+
+
+def test_a_locked_player_s_cell_still_gives_his_id():
+    """DK marks a player whose game has started `Name (ID) (LOCKED)`; anything like it reads too."""
+    for cell in (
+        "Kirk Cousins (44475679) (LOCKED)",
+        "Kirk Cousins (44475679)(LOCKED)",
+        "Kirk Cousins (44475679) (Locked)",
+        "Kirk Cousins (44475679) LOCKED",
+        "Kirk Cousins (44475679) (LOCKED) ",
+        "Kirk Cousins (44475679) (LOCKED) (SWAPPED)",
+        "Amon-Ra St. Brown (Jr.) (44475679) (LOCKED)",
+    ):
+        assert ent.cell_id(cell) == "44475679", cell
+    assert ent.cell_id("Kirk Cousins (LOCKED)") == ""  # no id at all: not a guess
+    assert ent.cell_id("Kirk Cousins (44475679) 12") == ""  # a number after it is not a tag
+
+
+def test_an_entries_file_downloaded_after_lock_reads_every_lineup(tmp_path):
+    """A hand-made file shaped like DK's after lock: locked cells tagged, games "Final" / "In Progress"."""
+    played = [(p, n, i, "Final" if g == EARLY else g, t) for p, n, i, g, t in PLAYERS]
+    locked = [
+        (
+            eid,
+            name,
+            cid,
+            fee,
+            tuple(c + " (LOCKED)" if c and c.split(" (")[0] in EARLY_NAMES else c for c in held),
+        )
+        for eid, name, cid, fee, held in ENTRIES
+    ]
+    got = ent.read_entries_file(
+        write_entries_file(tmp_path / "DKEntries.csv", entries=locked, players=played)
+    )
+    before = ent.read_entries_file(write_entries_file(tmp_path / "pre.csv"))
+    assert [e.ids for e in got.entries] == [e.ids for e in before.entries]  # every lineup, every id
+    assert any("(LOCKED)" in c for e in got.entries for c in e.cells)  # the fixture does lock some
+    early = next(p for p in got.players if p.name == "Quinn Early")
+    assert early.kickoff is None  # "Final": no kickoff to read
+
+
+EARLY_NAMES = {name for _pos, name, _id, game, _team in PLAYERS if game == EARLY}

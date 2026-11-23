@@ -354,6 +354,18 @@ class BuildsConfig(BaseModel):
     solver: Literal["search", "exact", "milp"] = "search"
 
 
+class CashConfig(BaseModel):
+    """`[cash]`: the cash Default's cheap-pair rule (`cash_pairs.py`, Sam's Week 11 note)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # two RB/WR/TE from one team who both cost under this are a "cheap pair" (0 turns the rule off)
+    cheap_salary: int = Field(6000, ge=0)
+    # the Default keeps a cheap pair only when its lineup beats the best one without by more than this many
+    # points
+    cheap_pair_margin: float = Field(1.5, ge=0.0)
+
+
 class SlateSheetConfig(BaseModel):
     """`[slates.<key>]`: a secondary slate's sheet (`slate.py`)."""
 
@@ -378,6 +390,7 @@ class Config(BaseModel):
     stakes: StakesConfig = StakesConfig()
     suggest: SuggestConfig = SuggestConfig()
     builds: BuildsConfig = BuildsConfig()
+    cash: CashConfig = CashConfig()
     contest_plan: ContestPlanConfig = ContestPlanConfig()
     ledger: LedgerConfig = LedgerConfig()
     # A secondary slate's own sheet, by slate key (`slate.py`): `[slates.thu] sheet_id = "..."`, written by

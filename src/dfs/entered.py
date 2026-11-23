@@ -11,7 +11,13 @@ keeps one file per week, `data/entered/<season>-wk<NN>.json`:
 
 The input is DK's entries file (Edit entries, downloaded by hand after entering, found in Downloads like
 `dfs entries fill` finds it) or, when there is none, the Lineups tab as it stands (lineups, no contests).
-The cash post-mortem (`week close`) reads it to compare the entered cash lineup to the nearest build."""
+The cash post-mortem (`week close`) reads it to compare the entered cash lineup to the nearest build.
+
+**Recording again after late swap is the normal path** (Sam's Week 11 note): a record replaces the week's,
+so the file always holds the final lineups, and every record saved is also appended to
+`<season>-wkNN.history.jsonl` beside it (append-only, never rewritten), so the version from before lock is
+kept and late-swap decisions can be scored (`versions`, `before_lock`). `changes` says what a new record
+changed against the one it replaces, lineup by lineup."""
 
 from __future__ import annotations
 
@@ -92,6 +98,23 @@ class EnteredRecord:
     # not said), and the fees of the entries the file held but skipped (a Showdown, another slate), by reason
     h2h: str = ""
     skipped_fees: dict[str, float] = field(default_factory=dict)
+    # the slate's first kickoff (ISO, from the entries file's player table; carried over from the record it
+    # replaces when read from the Lineups tab): a record saved after it holds the lineups after lock
+    first_kickoff: str = ""
+
+    @property
+    def after_lock(self) -> bool:
+        lock = _instant(self.first_kickoff)
+        at = _instant(self.recorded_at)
+        return lock is not None and at is not None and at >= lock
+
+
+def _instant(text: str) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(str(text))
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=UTC)
 
 
 def name_key(name: str) -> str:
@@ -172,20 +195,61 @@ def attach_sources(lineups: list[EnteredLineup], state: suggest_state.StateFile)
         lineup.source = match_build(lineup.names, state)
 
 
+def history_path(path: Path) -> Path:
+    """`<season>-wkNN.history.jsonl` beside the week's record: every version saved, oldest first."""
+    return path.with_name(path.stem + ".history.jsonl")
+
+
 def save(record: EnteredRecord, path: Path | None = None) -> Path:
+    """The week's record, replaced; and the same record appended to its history (append-only)."""
     path = path or record_path(record.season, record.week)
     path.parent.mkdir(parents=True, exist_ok=True)
+    with history_path(path).open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(asdict(record), indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(tmp, path)
     return path
 
 
+def versions(season: int, week: int, path: Path | None = None) -> list[EnteredRecord]:
+    """Every record saved for the week, oldest first (a line that cannot be read is skipped). A week recorded
+    before the history existed has only its record file: that one version."""
+    path = path or record_path(season, week)
+    out: list[EnteredRecord] = []
+    try:
+        lines = history_path(path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        rec = _parse(line) if line.strip() else None
+        if rec is not None:
+            out.append(rec)
+    if not out:
+        rec = load(season, week, path)
+        return [rec] if rec is not None else []
+    return out
+
+
+def before_lock(season: int, week: int, path: Path | None = None) -> EnteredRecord | None:
+    """The last version recorded before the slate locked (the lineups as entered, before any late swap), or
+    None when every version was recorded after lock or the lock time is not known."""
+    pre = [r for r in versions(season, week, path) if r.first_kickoff and not r.after_lock]
+    return pre[-1] if pre else None
+
+
 def load(season: int, week: int, path: Path | None = None) -> EnteredRecord | None:
     """The week's record, or None when there is none (or it cannot be read)."""
     path = path or record_path(season, week)
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        return _parse(path.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+
+
+def _parse(text: str) -> EnteredRecord | None:
+    try:
+        raw = json.loads(text)
         lineups = [
             EnteredLineup(
                 names=list(lu["names"]),
@@ -207,8 +271,9 @@ def load(season: int, week: int, path: Path | None = None) -> EnteredRecord | No
             blank=list(raw.get("blank", [])),
             h2h=str(raw.get("h2h", "") or ""),
             skipped_fees={str(k): float(v) for k, v in (raw.get("skipped_fees") or {}).items()},
+            first_kickoff=str(raw.get("first_kickoff", "") or ""),
         )
-    except (OSError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, AttributeError):
         return None
 
 
@@ -254,6 +319,98 @@ def summary_lines(record: EnteredRecord) -> list[str]:
     return out
 
 
+LABEL_GROUPS = 3  # contest kinds named in a lineup's label; the rest are "+N more"
+
+
+def lineup_label(lu: EnteredLineup, i: int) -> str:
+    """`L3` from the Lineups tab; `#2 (H2H $2 x20, Double Up $5 x2 +3 more)` from the entries file: the
+    entries it holds, by format and fee, most first."""
+    if lu.label:
+        return lu.label
+    count: dict[str, int] = {}
+    for c in lu.contests:
+        key = f"{c.format} {c.entry_fee}"
+        count[key] = count.get(key, 0) + len(c.entry_ids)
+    kinds = sorted(count, key=lambda k: -count[k])
+    where = ", ".join(k + (f" x{count[k]}" if count[k] > 1 else "") for k in kinds[:LABEL_GROUPS])
+    if len(kinds) > LABEL_GROUPS:
+        where += f" +{len(kinds) - LABEL_GROUPS} more"
+    return f"#{i}" + (f" ({where})" if where else "")
+
+
+def _swaps(was: Sequence[str], now: Sequence[str]) -> list[str]:
+    """Who went out and who came in: slot for slot where both lineups are in DK's slot order (a late swap
+    replaces a player in his slot: `WR Tre' Harris -> Malik Nabers`), the rest in order."""
+    from dfs.models import ROSTER_SLOTS
+
+    keys_was, keys_now = {name_key(x) for x in was if x}, {name_key(x) for x in now if x}
+    out = [x for x in was if x and name_key(x) not in keys_now]
+    into = [x for x in now if x and name_key(x) not in keys_was]
+    lines = []
+    if len(was) == len(now) == len(ROSTER_SLOTS):
+        for slot, a, b in zip(ROSTER_SLOTS, was, now, strict=True):
+            if a in out and b in into:
+                lines.append(f"{slot} {a} -> {b}")
+                out.remove(a)
+                into.remove(b)
+    lines += [f"{a} -> {b}" for a, b in zip(out, into, strict=False)]
+    lines += [f"{a} out" for a in out[len(into) :]] + [f"{b} in" for b in into[len(out) :]]
+    return lines
+
+
+def _entry_ids(lu: EnteredLineup) -> set[str]:
+    return {i for c in lu.contests for i in c.entry_ids}
+
+
+def _pair(
+    old: list[EnteredLineup], new: list[EnteredLineup]
+) -> list[tuple[EnteredLineup | None, EnteredLineup | None]]:
+    """Each new lineup with the old one it replaces: the one holding most of its DK entries (a late swap
+    keeps the entry, changes the players); without entries (the Lineups tab), the same label; else the one
+    sharing most players (at least 5). Old lineups left unpaired come last."""
+    left = list(range(len(old)))
+    out: list[tuple[EnteredLineup | None, EnteredLineup | None]] = []
+    for lu in new:
+
+        def score(j: int, lu: EnteredLineup = lu) -> tuple[int, int, int]:
+            o = old[j]
+            names = len({name_key(n) for n in o.names if n} & {name_key(n) for n in lu.names if n})
+            return (len(_entry_ids(o) & _entry_ids(lu)), int(bool(lu.label) and o.label == lu.label), names)
+
+        best = max(left, key=score, default=None)
+        if best is not None and (score(best)[0] or score(best)[1] or score(best)[2] >= 5):
+            out.append((old[best], lu))
+            left.remove(best)
+        else:
+            out.append((None, lu))
+    out += [(old[j], None) for j in left]
+    return out
+
+
+def changes(old: EnteredRecord, new: EnteredRecord) -> list[str]:
+    """What `new` changes against the record it replaces, lineup by lineup: who went out and who came in,
+    "unchanged", a lineup newly entered or no longer there. Empty when nothing changed."""
+    lines: list[str] = []
+    changed = False
+    for i, (o, n) in enumerate(_pair(old.lineups, new.lineups), start=1):
+        if n is None:
+            changed = True
+            lines.append(f"  no longer entered: {', '.join(x for x in o.names if x)}")
+            continue
+        label = lineup_label(n, i)
+        if o is None:
+            changed = True
+            lines.append(f"  {label}: new, {', '.join(x for x in n.names if x)}")
+            continue
+        swaps = _swaps(o.names, n.names)
+        if not swaps:
+            lines.append(f"  {label}: unchanged")
+            continue
+        changed = True
+        lines.append(f"  {label}: " + "; ".join(swaps))
+    return lines if changed else []
+
+
 def missing_warning(season: int, week: int) -> str:
     """`week close`'s warning when the week has no record ("" when it has one)."""
     if record_path(season, week).exists():
@@ -272,3 +429,42 @@ def file_week(players) -> tuple[int, int | None] | None:  # noqa: ANN001 - dfs.e
     if not kickoffs:
         return None
     return season_week(max(kickoffs).astimezone(UTC).date())
+
+
+# Once games are under way DK's player table says "Final" / "In Progress" where the kickoff was, so a file
+# downloaded after lock may have no readable kickoff at all (Sam's Week 11 file: none of 519). DK's player ids
+# are per draft group, so a file whose players are this week's synced slate is this week's.
+ON_SLATE_MIN = 0.9  # of the file's players on the synced slate (a sync may have dropped a row or two)
+
+
+def synced_rows(path: Path | None = None) -> list[dict]:
+    """The synced slate (`data/current/edge.csv`, the slate's own on a secondary slate); [] without one."""
+    import csv
+
+    from dfs import store
+
+    target = path or store.current_dir() / "edge.csv"
+    try:
+        with target.open(newline="", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+    except OSError:
+        return []
+
+
+def on_synced_slate(players, rows: Sequence[dict]) -> bool:  # noqa: ANN001 - dfs.entries.TablePlayer
+    """Whether the entries file's player table is the synced slate's (by DK id, `ON_SLATE_MIN` of them)."""
+    ids = {str(p.dk_id) for p in players if p.dk_id}
+    slate_ids = {str(r.get("Id", "")).strip() for r in rows} - {""}
+    return bool(ids) and len(ids & slate_ids) >= ON_SLATE_MIN * len(ids)
+
+
+def first_kickoff(players, rows: Sequence[dict] = (), previous: EnteredRecord | None = None) -> str:  # noqa: ANN001
+    """The slate's first kickoff, ISO: the earliest of the file's readable kickoffs, the synced slate's
+    `GameStart` and the record being replaced (after lock the file shows none for a game under way)."""
+    from dfs.kickoff import parse_kickoff
+
+    times = [p.kickoff for p in players if p.kickoff is not None]
+    times += [t for t in (parse_kickoff(r.get("GameStart")) for r in rows) if t is not None]
+    if previous is not None and _instant(previous.first_kickoff) is not None:
+        times.append(_instant(previous.first_kickoff))
+    return min(times).astimezone(UTC).isoformat(timespec="seconds") if times else ""

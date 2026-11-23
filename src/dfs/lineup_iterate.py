@@ -61,9 +61,9 @@ from datetime import datetime
 import pandas as pd
 
 from dfs import cash_core as cash_core_mod
+from dfs import cash_pairs, my_frame
 from dfs import lineup_shapes as shapes_mod
 from dfs import lineup_suggest as ls
-from dfs import my_frame
 from dfs import search_clock as clock
 from dfs import suggest_state as st
 from dfs.build_exact import LeafRules, described
@@ -270,6 +270,8 @@ def iterate_builds(
     shapes: Sequence[str] = ls.GPP_SHAPES,
     rank: str = ls.DEFAULT_RANK,
     bring_back_gain: float = BRING_BACK_GAIN,
+    cheap_salary: int = cash_pairs.CHEAP_SALARY,
+    cheap_pair_margin: float = cash_pairs.PAIR_MARGIN,
     freeze: bool = False,
     only: str | None = None,
 ) -> Iterated:
@@ -351,11 +353,24 @@ def iterate_builds(
         box = t + max(0.0, deadline - t) / (len(keys) - n)
         leaf = _leaf(rules, tags, job.kind)
         if job.kind == "cash":
-            lineups, done = ls.cash_lineups(pool, cap=cap, deadline=box, fixed=job.fixed, leaf_ok=leaf)
+            # the cheap-pair rule (`cash_pairs`): a pair Sam put on Always use is his, and flagged
+            lineups, done, pair = ls.cash_candidates(
+                pool,
+                cap=cap,
+                deadline=box,
+                fixed=job.fixed,
+                leaf_ok=leaf,
+                cheap_salary=cheap_salary,
+                pair_margin=cheap_pair_margin,
+                own=ls.cash_ownership(edge),
+            )
             if report.cash_core is None:  # the first cash search is the Default's (`cash_core`)
                 report.cash_core = cash_core_mod.cash_core(
                     lineups, pool, cap=cap, kickoff=kickoff, legal=leaf, k=ls.CASH_TOP_K, complete=done
                 )
+                report.cheap_pair = pair
+                if pair is not None:
+                    notes.append("Cash: " + pair.text)
         else:
             plan = ls.GPP_PLAN if any(p.position == "QB" for p in job.fixed) else ITERATE_PLAN
             lineups, done, cutoff = ls.gpp_candidates(

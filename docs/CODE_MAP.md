@@ -68,7 +68,12 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   candidate = `cash: Name` on Always use, key `spot:<SLOT>`; the served page then runs `dfs lineups suggest --iterate --only
   cash`) and **cash lineup** card; the board's Cash core role is the real core once a run saved one (`week_plays.cash_core_guess`
   before). `--only cash|gpp` (with `--iterate`) reruns one kind and freezes the other; `--only cash` rebuilds the cash builds even
-  when their decision is Keep (blank), so the Default follows the rules box. The entries hint (`entries.suggest_pick`) for a cash
+  when their decision is Keep (blank), so the Default follows the rules box. **The cheap same-team pair** (`cash_pairs.py`, pure;
+  `lineup_suggest.cash_candidates` runs it for `suggest` and `--iterate`; `[cash]` in config.toml): the Default avoids two cheap
+  RB / WR / TE from one team (under $6,000) unless its lineup beats the best one keeping the pair's most-owned player by more
+  than `cheap_pair_margin`; the week input's
+  `cheap_pair` feeds the cash board's flag (`week_top.pair_flag_html`) and the Sunday check (`lock_state.pair_check`); the rule is
+  `LeafRules.cheap_salary` to the exact solvers (`tests/test_cash_pairs.py` holds all three to an exhaustive answer). The entries hint (`entries.suggest_pick`) for a cash
   contest is the Default. `dfs week close` refits the line (`du_line_retro.refresh_summary`, before the review). The Lineups tab's
   Cash % column and late swap's Cash % stay this season.
 - **Rules box scope** (`suggest_state.scoped_item`): an Always use / Never use item may start `cash:` or `gpp:` and then
@@ -110,7 +115,11 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
 - `dfs entries record [--csv <file>] [--h2h posted|joined|both] [--from-sheet] [--sheet-id <id>] [--dry-run]` -- at lock, after entering
   (`entered.py`): DK's entries file downloaded again (newest in Downloads, refused when it is another week's), else
   the Lineups tab; writes `data/entered/<season>-wk<NN>.json` (each lineup, its contests, its source build: 8+ of
-  9 players in one saved build of the week, else "own"). `week close` warns when the week has none.
+  9 players in one saved build of the week, else "own"). `week close` warns when the week has none. Recording again (after
+  late swap, the normal path) replaces the record, prints what changed lineup by lineup (`entered.changes`) and appends every
+  version to `<season>-wk<NN>.history.jsonl` (`entered.versions`, `entered.before_lock`); a file downloaded after lock reads
+  (`(LOCKED)` cells, `entries._ID_AT_END`; no kickoffs, so the week is proved by its DK ids against the synced slate,
+  `entered.on_synced_slate`).
 - `dfs entries fill [--csv <file>] [--write] [--again] [--dry-run] [--sheet-id <id>]` -- DK's entries file (newest in
   Downloads, by header) onto `DK Upload`: one row per Classic main-slate entry; **Sam picks each entry's `Lineup`**
   (dropdown) and nothing is ever auto-assigned (`Suggested` is a grey hint, `entries.suggest_pick`, the hook

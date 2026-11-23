@@ -457,8 +457,45 @@ def cash_board_html(core: dict, ds: list[wb.Decision], why: dict[str, str], live
     return (
         f'<section class="card dec cashboard" id="cash-board"><div class="card-head"><h2>Cash board</h2> '
         f"{chip_html('Untested', 'One cash lineup a week: the core is what the near-optimal lineups agree on, not a proven edge.')}"
-        f"</div>{head}{''.join(rows) or '<p class=dim>No core yet.</p>'}</section>"
+        f"</div>{pair_flag_html(core)}{head}{''.join(rows) or '<p class=dim>No core yet.</p>'}</section>"
     )
+
+
+def pair_flag_html(core: dict) -> str:
+    """The cheap-pair flag (`cash_pairs`, the `cash_core` input's `cheap_pair`): the pair the Default holds,
+    with the best lineup without them one click away as a difference, or the pair it avoided, with what the
+    rule changed. Empty when there is neither."""
+    pair = (core.get("cheap_pair") or {}).get("pair")
+    if not pair:
+        return ""
+    text = e(pair.get("text", ""))
+    cls = "pairflag" if pair.get("kept") else "pairflag avoided"
+    change = pair.get("change")
+    if not change:
+        return f'<p class="{cls}">{text}</p>'
+    rows = "".join(
+        f'<li><span class="posb">{e(w.get("position", ""))}</span>{e(w.get("out", ""))} &rarr; '
+        f'<b>{e(w.get("in", ""))}</b><span class="num">{num(w.get("d_points")) or 0:+.1f} pts</span>'
+        f'<span class="num">{_signed_money(w.get("d_salary"))} freed</span></li>'
+        for w in change.get("swaps") or []
+    )
+    head = (
+        "The best lineup without them"
+        if pair.get("kept")
+        else f"The lineup with them was {num(change.get('from_projection')) or 0:.1f} pts; the Default"
+    )
+    return (
+        f'<details class="{cls}"><summary>{text}</summary><p class="dim">{e(head)}: '
+        f"{num(change.get('projection')) or 0:.1f} pts, {_money(change.get('salary'))}.</p>"
+        f'<ul class="pairswaps">{rows}</ul></details>'
+    )
+
+
+def _signed_money(v: object) -> str:
+    x = num(v)
+    if x is None:
+        return "-"
+    return f"{'-' if x < 0 else '+'}${abs(x):,.0f}"
 
 
 SPOTS_COLS = 7  # player (name, team, kickoff), points, salary, cash own, flags, in N of M, Pick

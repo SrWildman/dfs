@@ -252,6 +252,11 @@ form was removed in the design pass, Removal F7: the tier rules above are the ch
 then run it: it records every lineup you entered, the contests it went into and the Suggested build it came from (8 or
 more of its 9 players in one saved build of the week, any round) or "own", to `data/entered/<season>-wk<NN>.json`. With
 no entries file it reads the Lineups tab (lineups only). `dfs week close` warns when the week has no record.
+**After late swap, record again** (the normal path): download the entries file again and rerun it. It replaces the week's
+record with the final lineups, says what changed lineup by lineup (`#4 (Double Up $5): WR Tre' Harris -> Malik Nabers`), and
+keeps every version in `<season>-wk<NN>.history.jsonl` beside it, so the lineups from before lock are kept. A file downloaded
+after lock reads as it is: DK marks a locked player `(LOCKED)` and shows no kickoff for a game under way, so the file is
+matched to the week by its players' DK ids.
 
 `dfs entries print` is for pairing by hand (or in a hurry at a lock): every built lineup as `Name (ID)` in DK's slot order
 (QB RB RB WR WR WR TE FLEX DST) with its CalPts, ProjPts and summed Own% in front, printed and written to

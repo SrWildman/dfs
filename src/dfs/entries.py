@@ -41,7 +41,9 @@ ENTRY_HEADER = DK_UPLOAD_HEADER[:4]  # Entry ID, Contest Name, Contest ID, Entry
 SHOWDOWN_FIRST_SLOT = "CPT"
 TABLE_HEADER = ("Position", "Name + ID", "Name", "ID", "Roster Position", "Salary", "Game Info", "TeamAbbrev")
 LINEUP_LABEL = re.compile(r"^\s*L\s*(\d+)\s*$", re.IGNORECASE)
-_ID_AT_END = re.compile(r"\((\d+)\)\s*$")
+# `Name (ID)`, and after lock DK's `Name (ID) (LOCKED)` (Sam's Week 11 note: every locked player failed to
+# parse): the id is the last `(digits)`, with any tags after it, in brackets or bare (`(LOCKED)`, `LOCKED`)
+_ID_AT_END = re.compile(r"\((\d+)\)(?:\s*\([A-Za-z][^()]*\)|\s+[A-Za-z]+)*\s*$")
 _GAME_INFO = re.compile(r"(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s*ET", re.IGNORECASE)
 MAIN_SLATE_FIRST_HOUR, MAIN_SLATE_LAST_HOUR = 12, 17  # a Sunday kickoff 12:00-17:59 ET (`dk_salaries`)
 

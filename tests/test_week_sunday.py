@@ -132,7 +132,7 @@ def test_the_sunday_view_leads_with_what_changed_then_chalk_checks_and_a_folded_
     out = week_sunday.sunday_html(inp, lv, live=True)
     order = [out.index(f'id="{sid}"') for sid in ("lock-card", "chalk-sun", "prelock", "late")]
     assert order == sorted(order)
-    assert out.count('<li class="chk1') == 4  # the four checks, one line each
+    assert out.count('<li class="chk1') == 5  # the five checks, one line each
     late = out[out.index('id="late"') :]
     assert "<details" in late and " open" not in late.split(">", 2)[1]  # folded to its one line
     page = week_page.render(inp)
