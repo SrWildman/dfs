@@ -23,7 +23,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from dfs import contest_tiers, stakes
+from dfs import contest_tiers, slate_chain, stakes
+
+SLATE_ROWS_SPARE = 12  # Season rows read past `last_row`, for the secondary slates' rows
 
 # Season tab headers (sheet_season_view.py builds them; found by name, never by letter)
 SEASON_HEADERS = {
@@ -93,11 +95,14 @@ def season_rows(grid: list[list[Any]]) -> list[dict]:
             i = at.get(key)
             return number(row[i]) if i is not None and i < len(row) and row[i] not in ("", None) else None
 
-        week = cell("week")
-        if week is None:
+        i = at["week"]
+        parsed = slate_chain.parse_label(row[i]) if i < len(row) else None
+        if parsed is None:
             continue
-        rec = {key: cell(key) for key in SEASON_HEADERS}
-        rec["week"] = int(week)
+        rec = {key: cell(key) for key in SEASON_HEADERS if key != "week"}
+        # A secondary slate's row ("12 Thu", `slate_chain`) is a row of its own, in date order.
+        rec["week"], rec["slate"] = parsed
+        rec["label"] = slate_chain.season_label(*parsed)
         filled = [rec[k] for k in ("cash_net", "gpp_net", "betting_net", "other_net", "ending")]
         if all(v is None for v in filled):
             continue
@@ -167,7 +172,7 @@ def curve(rows: list[dict]) -> list[dict]:
     out = []
     cum = dict.fromkeys(("dfs", "betting", "other", "total"), 0.0)
     prev_end = None
-    for r in sorted(rows, key=lambda r: r["week"]):
+    for r in sorted(rows, key=lambda r: slate_chain.position(r["week"], r.get("slate", "main"))):
         dfs = (r.get("cash_net") or 0.0) + (r.get("gpp_net") or 0.0)
         bet = r.get("betting_net") or 0.0
         other = r.get("other_net") or 0.0
@@ -179,6 +184,10 @@ def curve(rows: list[dict]) -> list[dict]:
         out.append(
             {
                 "week": r["week"],
+                "label": r.get("label", str(r["week"])),
+                # where the point sits on the chart: a Thursday slate a little before its week's Sunday
+                "x": r["week"]
+                + (slate_chain.DAY_ORDER[r.get("slate", "main")] - slate_chain.DAY_ORDER["main"]) / 7,
                 "net": {"dfs": dfs, "betting": bet, "other": other, "total": dfs + bet + other},
                 "cum": {k: round(v, 2) for k, v in cum.items()},
                 "ending": r.get("ending"),
@@ -246,7 +255,10 @@ def read_sheet(client, cfg) -> tuple[list[dict], dict[str, float]]:  # noqa: ANN
 
     season = cfg.season
     width = column_letter(len(SEASON_HEADERS) + 12)
-    grid = client.read_range_unformatted(season.tab, f"A{season.header_row}:{width}{season.last_row}")
+    # past `last_row`: a secondary slate's row moves the last weeks down (`slate_chain`); rows that are not a
+    # slate's ("Year to date", ...) are skipped by their label
+    last = season.last_row + SLATE_ROWS_SPARE
+    grid = client.read_range_unformatted(season.tab, f"A{season.header_row}:{width}{last}")
     block = client.read_range_unformatted(cfg.bankroll.tab, BLOCK_SCAN)
     return season_rows(grid), block_values(block)
 

@@ -41,7 +41,14 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   paths are exactly what they were. Its salaries: `sources.dk_salaries.pick_slate_draft_group` (the largest Classic
   group all on the slate's day, Eastern time). The close: `slate_close` keeps a secondary slate's contests out of
   Results and its standings out of `data/raw/dk_standings/` (`contests.capture.capture_standings(divert=...)`).
-  Tests: `tests/test_slate.py`, `tests/test_slate_close.py`, `tests/sources/test_dk_salaries_slates.py`.
+  Its money (`slate_chain.py` pure, `sheet_bankroll_carry.py` I/O): every slate's sheet is a ledger of its own, in
+  date order (`slate_chain.links` from config.toml's sheets and their titles, `previous`, `since_last_main`); an
+  entry's ledger is `slate_chain.entry_slate` (`for_slate`, `log_for_slate`); `cli._sync_bankroll_from_csv` books
+  only the slate's own; its Season row is `"12 Thu"` (`season.row_labels` / `ensure_slate_row`,
+  `sheet_season_view.label_rows` / `insert_slate_row`, `season.carry_season` for `week new`); `dfs bankroll carry`
+  and the close's `cli._carry_before_close` set Starting Bankroll from the previous slate's Ending.
+  Tests: `tests/test_slate.py`, `tests/test_slate_close.py`, `tests/test_slate_money.py`,
+  `tests/sources/test_dk_salaries_slates.py`.
 
 ## Sync, sources and the news log
 

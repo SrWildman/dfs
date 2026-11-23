@@ -122,6 +122,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
         "`bankroll sync` for you, and `dfs week new` rebuilds the STAKES block (`bankroll stakes`).",
         [
             "dfs bankroll sync",
+            "dfs bankroll carry",
             "dfs bankroll stakes",
             "dfs contests update",
             "dfs contests plan",

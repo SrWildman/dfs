@@ -90,9 +90,8 @@ def test_the_slate_comes_from_the_option_or_the_environment():
 @pytest.mark.parametrize(
     "argv",
     [
-        ["week", "close", "--slate", "thu"],
+        # `week close` and `bankroll sync` take a slate now: each slate's money is booked on its own sheet
         ["results", "update", "--slate", "thu"],
-        ["bankroll", "sync", "--slate", "thu"],
         ["contests", "update", "--slate", "thu"],
     ],
 )
@@ -104,7 +103,7 @@ def test_a_main_only_command_refuses_a_secondary_slate_before_it_runs(argv):
 
 def test_the_environment_is_enough_to_refuse(monkeypatch):
     monkeypatch.setenv(slate.ENV_VAR, "thu")
-    result = CliRunner().invoke(app, ["week", "close"])
+    result = CliRunner().invoke(app, ["results", "update"])
     assert result.exit_code == 1
     assert "runs for the main slate only" in result.output
 
@@ -136,7 +135,8 @@ def test_refusal_is_by_command_path():
     assert slate.refusal("dfs sync --live --slate", "thu") is None
     assert slate.refusal("dfs lineups suggest --iterate", "thu") is None
     assert slate.refusal("dfs week close --research", "main") is None
-    assert "main slate only" in slate.refusal("dfs week close --research", "thu")
+    assert slate.refusal("dfs week close --research", "thu") is None  # every slate closes on its own sheet
+    assert "main slate only" in slate.refusal("dfs results update --all", "thu")
 
 
 # -- the config ----------------------------------------------------------------------------------------------

@@ -9,9 +9,10 @@ there works on the same slate). The CLI entry point (`prompt_missing.PromptingGr
 command runs and holds it for the whole command (`active`). Left out, it is `main`, and nothing changes.
 
 **Default deny.** Any command not in `SLATE_COMMANDS` refuses a secondary slate before it runs
-(`refusal`): the close, `results update`, the research and model commands, the contests engine and the
-bankroll stay the main slate's alone, so nothing from a secondary slate can enter the main slate's records or
-model fits.
+(`refusal`): `results update`, the research and model commands and the contests engine stay the main slate's
+alone, so nothing from a secondary slate can enter the main slate's records or model fits. The money is every
+slate's own (`slate_chain`): `week close`, `bankroll sync` and `bankroll carry` take a slate and book only its
+entries on its own sheet.
 
 **Where a secondary slate's files go.** Under its own folder, `data/slates/<key>/` (`root`): its synced
 `current/` copies and `raw/` snapshots, its pools, builds (`suggest_state`), entries, late swap, Week page,
@@ -63,6 +64,9 @@ SLATE_COMMANDS = frozenset(
         "dfs entries record",
         "dfs entries fill",
         "dfs entries print",
+        "dfs bankroll sync",
+        "dfs bankroll carry",
+        "dfs week close",
         "dfs week new",
         "dfs week page",
         "dfs week serve",

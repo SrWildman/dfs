@@ -19,6 +19,9 @@ _URL_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
 _SHEET_ID_LINE_RE = re.compile(r'^sheet_id\s*=\s*".*"\s*$', re.MULTILINE)
 _PREVIOUS_SHEET_ID_LINE_RE = re.compile(r'^previous_sheet_id\s*=\s*".*"\s*$', re.MULTILINE)
 _WEEK_TITLE_RE = re.compile(r"^Week (\d+)$")
+# Inside a [slates.<key>] table: one line each, never the newlines after it (the table may not be the last).
+_SLATE_SHEET_ID_LINE_RE = re.compile(r'^sheet_id[ \t]*=[ \t]*"[^"\n]*"[ \t]*$', re.MULTILINE)
+_SLATE_WEEK_LINE_RE = re.compile(r"^week[ \t]*=[ \t]*\d+[ \t]*$", re.MULTILINE)
 
 # Cells `dfs week new` copies from the outgoing sheet's Bankroll tab to the
 # new one -- the Ending balance of each of the three parallel bankrolls
@@ -208,12 +211,12 @@ def resolve_week_title(current_title: str, resolved_week: int) -> WeekTitleResol
     return WeekTitleResolution(target_title=target_title, needs_rename=current_title != target_title)
 
 
-def rewrite_slate_sheet_id(config_text: str, *, key: str, new_sheet_id: str) -> str:
-    """Set `[slates.<key>] sheet_id = "<new_sheet_id>"` in config.toml's text (`slate.py`): replace the line
-    in
-    that table when it exists, else append the table at the end. Nothing else changes, and the result is
-    checked: it must still parse, keep `[google_sheets] sheet_id` (and `previous_sheet_id`) exactly as they
-    were, and hold the new id. Raises ValueError otherwise."""
+def rewrite_slate_sheet_id(config_text: str, *, key: str, new_sheet_id: str, week: int | None = None) -> str:
+    """Set `[slates.<key>] sheet_id = "<new_sheet_id>"` (and `week = <week>` when given: the NFL week the
+    sheet is for, `slate_chain`) in config.toml's text (`slate.py`): replace the lines in that table when they
+    exist, else add them (the table is appended at the end when there is none). Nothing else changes, and the
+    result is checked: it must still parse, keep `[google_sheets] sheet_id` (and `previous_sheet_id`) exactly
+    as they were, and hold the new id (and week). Raises ValueError otherwise."""
     import tomllib
 
     if not re.fullmatch(r"[a-zA-Z0-9_-]+", new_sheet_id):
@@ -222,23 +225,33 @@ def rewrite_slate_sheet_id(config_text: str, *, key: str, new_sheet_id: str) -> 
     header = re.compile(rf"^\[slates\.{re.escape(key)}\]\s*$", re.MULTILINE)
     found = header.search(config_text)
     line = f'sheet_id = "{new_sheet_id}"'
+    week_line = f"week = {int(week)}" if week is not None else None
     if found is None:
-        updated = config_text.rstrip("\n") + f"\n\n[slates.{key}]\n{line}\n"
+        extra = f"{week_line}\n" if week_line else ""
+        updated = config_text.rstrip("\n") + f"\n\n[slates.{key}]\n{line}\n{extra}"
     else:
         start = found.end()
         nxt = re.search(r"^\[", config_text[start:], re.MULTILINE)
         end = start + nxt.start() if nxt else len(config_text)
         table = config_text[start:end]
-        if _SHEET_ID_LINE_RE.search(table):
-            table = _SHEET_ID_LINE_RE.sub(line, table, count=1)
+        if _SLATE_SHEET_ID_LINE_RE.search(table):
+            table = _SLATE_SHEET_ID_LINE_RE.sub(line, table, count=1)
         else:
             table = f"\n{line}" + table
+        if week_line is not None:
+            if _SLATE_WEEK_LINE_RE.search(table):
+                table = _SLATE_WEEK_LINE_RE.sub(week_line, table, count=1)
+            else:
+                table = table.replace(line, f"{line}\n{week_line}", 1)
         updated = config_text[:start] + table + config_text[end:]
     after = tomllib.loads(updated)
     if after.get("google_sheets") != before.get("google_sheets"):
         raise ValueError("Rewriting [slates] would change [google_sheets]: not written.")
-    if after.get("slates", {}).get(key, {}).get("sheet_id") != new_sheet_id:
+    entry = after.get("slates", {}).get(key, {})
+    if entry.get("sheet_id") != new_sheet_id:
         raise ValueError(f"[slates.{key}] sheet_id did not take: not written.")
+    if week is not None and entry.get("week") != int(week):
+        raise ValueError(f"[slates.{key}] week did not take: not written.")
     return updated
 
 

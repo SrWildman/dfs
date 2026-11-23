@@ -1140,7 +1140,16 @@ Round 5 change): recorded by hand from the confirmed misfiled-bet list
 $2.34, Ending read from that week's own `Bankroll!B2` ($196.45, matching
 Week 3's Starting balance). The old sheet itself is never edited.
 
-**Year-to-date block** (rows 21-26, formulas only): per bucket (Cash,
+**A secondary slate's row** (`slate_chain`, Nov 2026): every slate is a ledger of its own, so a Thanksgiving
+slate has a row of its own, labelled `12 Thu`, between `11` and `12`. It is inserted by a real row insert the
+first time that slate's sheet is set up or closed (`sheet_season_view.insert_slate_row`), with its own `E` and
+`N:Q` formulas; Sheets moves every formula range under it, the year-to-date block is rewritten over every row
+and the chart block gets one point per row. Nothing in the code holds a Season row number: rows are found by
+their label in `A` (`season.row_labels`), down to the blank row above "Year to date". `dfs week new` inserts
+the rows the previous sheet has before it copies, so both tabs hold the same rows. A tab without one is exactly
+as before.
+
+**Year-to-date block** (rows 21-26 with no slate row, formulas only): per bucket (Cash,
 GPP, Betting, Total) -- Net, amount Risked, ROI (`Net/Risked`); Betting
 also shows its W-L-P record and expected-vs-actual wins (`SUM` of the
 weekly wins/losses/pushes/expected-wins columns).
