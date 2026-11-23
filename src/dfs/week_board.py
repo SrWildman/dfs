@@ -606,6 +606,10 @@ class Step:
     name: str
     state: str
     status: str
+    # when the step's command last ran this week (the run log, or the time its output was saved when the
+    # log has nothing newer) and whether that run failed: "Run again" says it (Sam's Week 11 note)
+    at: datetime | None = None
+    failed: bool = False
 
     @property
     def say(self) -> str:
@@ -658,7 +662,7 @@ def progress(inp: WeekInputs, pool: dict[str, str]) -> list[Step]:
         done["Entries recorded"] = f"{n} lineup{'s' if n != 1 else ''}" if n else "recorded"
     ls_at = parse_time((inp.late_swap or {}).get("saved_at"))
     if ls_at is not None and ls_at >= start:
-        done["Late swap"] = f"ran {day_label(now, ls_at)} {ls_at.astimezone():%-I:%M %p}".replace(" 0", " ")
+        done["Late swap"] = f"done {day_label(now, ls_at)}"  # the time is on "last ran" (`Step.at`)
     closed = week_closed(inp)
     if closed is not None:
         done["Close"] = f"done {day_label(now, closed)}"
@@ -670,17 +674,40 @@ def progress(inp: WeekInputs, pool: dict[str, str]) -> list[Step]:
         "Late swap": "Sunday",
         "Close": "Monday",
     }
+    saved = {
+        "Contest plan": plan_at,
+        "Builds": s_at,
+        "Entries recorded": parse_time(entered.get("recorded_at")),
+        "Late swap": ls_at,
+        "Close": closed,
+    }
     steps = []
     seen_next = False
     for name in STEP_NAMES:
         if name in done:
-            steps.append(Step(name, DONE, done[name]))
+            at, failed = last_ran(inp, name, saved.get(name), start)
+            steps.append(Step(name, DONE, done[name], at, failed))
         elif not seen_next:
             steps.append(Step(name, NEXT, todo[name]))
             seen_next = True
         else:
             steps.append(Step(name, TODO, todo[name]))
     return steps
+
+
+def last_ran(
+    inp: WeekInputs, name: str, saved: datetime | None, start: datetime
+) -> tuple[datetime | None, bool]:
+    """When a step's command last ran this week and whether that run failed: the run log's latest run of the
+    command (any options, a terminal's or a button's) when it is newer than the step's saved output, else the
+    time the output was saved."""
+    from dfs import runlog
+
+    command = STEP_ACTION[name][1]
+    run = runlog.last_run(inp.runs, " ".join(w for w in command.split() if not w.startswith("-")))
+    if run is not None and run.time >= start and (saved is None or run.time > saved):
+        return run.time, not run.ok
+    return saved, False
 
 
 def next_step(steps: list[Step]) -> Step | None:

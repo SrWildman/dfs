@@ -193,10 +193,12 @@ def test_every_place_that_shows_a_pool_value_carries_the_players_id(tmp_path):
     assert 'class="poolval" data-id="id-Qb Alpha"' in section(page, "decisions")
     assert 'class="poolval" data-id="' in section(page, "consensus")
     js = week_ui.JS
-    assert "$$('.seg[data-id=\"' + CSS.escape(id) + '\"]')" in js  # board and drawer controls
-    assert "$$('.poolval[data-id=\"' + CSS.escape(id) + '\"]')" in js  # decisions, consensus, game view
-    assert "$$('button.pivot[data-pivot=\"' + CSS.escape(id) + '\"]')" in js  # the pivot's `was`
-    assert "window.dfsExplorer.setPool(id, v)" in js  # the Explorer's Pool column
+    # each place, painted by one player's id (`paint`) or a section at a time (`paintIn`, Week 11)
+    assert "['.seg', 'id'," in js  # board and drawer controls
+    assert "['.poolval', 'id'," in js  # decisions, consensus, game view
+    assert "['button.pivot', 'pivot'," in js  # the pivot's `was`
+    assert "sel + '[' + attrOf(key) + '=\"' + q + '\"]'" in js and "sel + '[' + attrOf(key) + ']'" in js
+    assert "window.dfsExplorer.setPool(id, st[0])" in js  # the Explorer's Pool column
     assert (
         "function showPool(values) { if (window.dfsPool) window.dfsPool.set(values || {}); }" in week_live.JS
     )
@@ -222,7 +224,9 @@ def test_pool_writes_queue_instead_of_being_refused(tmp_path):
     js = week_ui.JS
     assert "One change at a time" not in week_live.JS  # the old refusal is gone
     assert "Q.push(job); pump();" in js
-    assert "P.saving[c.id] = v" in js and "saving\\2026" in week_ui.CSS  # "saving..." on each cell
+    # Week 11: one batch in flight, the clicks waiting coalesced per player into the next one
+    assert "if (!batchQueued) { batchQueued = true; window.dfsQueue.run(sendBatch); }" in js
+    assert "P.saving[c.id] = c.add ?" in js and "saving\\2026" in week_ui.CSS  # "saving..." on each cell
     assert "res.status === 'conflict'" in js and "drawIssues()" in js  # a refused cell keeps its own row
     assert "window.dfsQueue.run(async () => {" in week_live.JS  # decisions wait their turn too
 

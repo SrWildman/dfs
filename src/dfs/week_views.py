@@ -914,7 +914,7 @@ def _lock_buttons(r, answered: dict, live: bool) -> str:  # noqa: ANN001
     done = answered.get(r.key)
     if done is not None:
         word = ANSWER_WORD.get(str(done.get("kind")), str(done.get("kind")))
-        return f'<span class="answered">{e(word)}</span>'
+        return f'<span class="answered" data-row="{e(r.key)}">{e(word)}</span>'
     if not live:
         return ""
     lineups = e(json.dumps(list(r.swap.lineups if r.swap else r.touches)))

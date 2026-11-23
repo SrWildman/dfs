@@ -34,14 +34,26 @@ More view and on Everything.
   - Sunday (`sunday_facts`): Lock · News since Saturday night · Lineups: players at risk (each OUT / D / Q player
     really in a lineup, the Default when none is on file, counted once and with the lineups that hold him; news that
     reaches a lineup only through a teammate is not counted, `week_sunday.at_risk` / `lineups_holding`) · Swaps open ·
-    Entered;
+    Entered. News carries **Sync** (`dfs sync --live`) and Swaps open **Late swap** (`dfs lineups late-swap
+    --refresh-injuries`), "… again" with when each last ran once it has run this week (`SUNDAY_SYNC` /
+    `SUNDAY_SWAP`, `Fact.run`; the run log; Sam's Week 11 note);
   - Tuesday (`tuesday_facts`): Week net · Cash x of y · Scorecards · Next.
 
   An item that waits on a step says what it waits for: "not run yet" never takes a row.
 - **This week** (the side column, `this_week_html`, on the three day views and Everything): the six steps of the week
   (`week_board.progress`) as a checklist, each step not done with its **Run** button (a command button on the served
-  page, the `dfs` line to copy on the static one), and the **file drop zone** below it. A step that has not run is
-  listed here, not in the body.
+  page, the `dfs` line to copy on the static one), each step that has run with **Run again** and when it last ran
+  (`Step.at` / `failed`, `week_board.last_ran`: the run log's latest run of its command this week when it is newer
+  than the step's saved output, "(failed)" when that run failed; Sam's Week 11 note), and the **file drop zone** below
+  it. A step that has not run is listed here, not in the body.
+- **Every action says it is working** (`week_live`'s `dfsAct`; Sam's Week 11 note): Run / Run again, Play / Fade / Pick
+  / Undo and Swap / Keep / Later show a spinner and "running…" and are disabled (every button of the same action) while
+  in flight, the elapsed time after a second; then one line beside them (`.actst`): done or failed, the time, how
+  long, one line of result (a job's last line of output, a write's message) and, for a command, the `output` link to
+  the run panel. Keyed by what the button acts on (`run:<command>`, `dec:<key>`, `lock:<row>`), so the refresh that
+  replaces the section draws it again; a core Play / Fade's cash rerun shows on the decision's own line.
+- **A row highlight on hover** in every table and player row (`tbody tr`, `.prow`, `.crow`, `.orow`): the `row-hover`
+  token in both themes, only where the pointer can hover; the contrast test hovers a row in every view.
 - **More** (`week_shell.MORE`, `more_html`): one row of pills, each a view of its own (`#name`), so every section is
   one click away while the day view leads: Board, Explorer, Games, Usage, Injuries, Model vs sources, Overview (the old
   Saturday scan) | Builds, Game day, Ledger and plan, Last week, Season-long | Run a command, Everything. Where each
@@ -163,7 +175,13 @@ More view and on Everything.
   client pool store (`dfsPool`, painted on every `.seg` / `.poolval` and the Explorer) fed by each write's read-back;
   multi-select with a bulk bar, sent as `{"each": true, "changes": [...]}` to `/api/pool`
   (`week_writes.SheetEdits.set_pool_each`: one batch, per-cell conflict / missing, `week_actions.MAX_BULK`), writes
-  queued (`dfsQueue`); decisions also move the pool (`week_actions.decide_pool`, `merge_pool`, `add_kind`,
+  queued (`dfsQueue`). Every pool click goes through one batch queue (Sam's Week 11 note: quick clicks froze the page
+  and dropped some): it shows at once ("saving…"), waits in `NEXT` (a player clicked again before it is sent keeps
+  only his last value), and one batch carries everything waiting, so one pool write is in flight at a time; a click
+  during a write goes in the next batch, checked against its read-back, and a refused cell drops the clicks queued
+  behind it (the sheet wins) onto the issues list. A refresh paints each section it puts back in one pass
+  (`pool.paintIn`; it used to repaint the whole page per section, seconds in Firefox on a 400-player slate); the
+  browser test `tests/test_week_pool_clicks_browser.py` holds it to no frame over 200 ms; decisions also move the pool (`week_actions.decide_pool`, `merge_pool`, `add_kind`,
   `drop_cash_only`; the pool half is kept under `pool:` keys in the `decisions` input so Undo reverses it); the chart
   viewer (`week_charts.viewer_data`, JSON `chart-data`); the game view (`week_top.game_data`, JSON `game-data`;
   its "Write as a Max exposure stack" button, `/api/stack`, left in Removal F7); the cash core's caps

@@ -716,7 +716,7 @@ function render(redrawPicker = true) {
     tb.append(tr);
   }
   table.append(tb);
-  if (window.dfsPool) for (const r of rows) window.dfsPool.paint(D.ids[r.__i]);
+  if (window.dfsPool) window.dfsPool.paintIn(table);   // one pass over the rows drawn
   if (window.dfsShade) window.dfsShade.table(table);   // within each position (week_shade)
   if (redrawPicker && !picker.hidden) drawPicker();
 }
