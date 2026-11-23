@@ -396,3 +396,31 @@ def test_a_past_nfl_week_is_closed_whatever_slate_the_page_reads():
     assert ls.week_over(2026, 9, tue_after) is not None
     assert ls.week_over(2026, 9, datetime(2026, 11, 9, 23, 0, tzinfo=UTC)) is None  # Monday night: not yet
     assert ls.week_over(2026, 11, tue_after) is None
+
+
+def test_a_cash_lineup_with_two_cheap_teammates_is_flagged():
+    """Sam's Week 11 note: the cheap same-team pair (`cash_pairs`) on the Lineups-tab lineups Sunday reads."""
+    e = edge()  # every player is GB: four of them cost under $6,000
+    checks = {c.key: c for c in ls.checklist(e, [lineup()], None, MORNING)}
+    assert checks["pair"].ok is False
+    assert checks["pair"].detail == (
+        "L1: 4 cheap GB players (Te One $4,000, Wr Three $4,000, Rb Two $5,000, Wr Two $5,000)"
+    )
+    # a GPP lineup is not checked: the rule is cash only
+    assert ls.checklist(e, [lineup(kind="gpp")], None, MORNING)[-1].ok is None
+    # the line comes from the build's own setting
+    core = {"cheap_pair": {"cheap_salary": 4000, "pair": None}}  # nobody costs under $4,000
+    assert {c.key: c for c in ls.checklist(e, [lineup()], None, MORNING, cash_core=core)}["pair"].ok
+
+
+def test_the_default_s_own_pair_says_what_it_earns():
+    text = "Two cheap GB players (Te One $4,000, Wr Three $4,000): +2.1 pts over the best lineup without them"
+    core = {
+        "default": {"names": list(NAMES)},
+        "cheap_pair": {
+            "cheap_salary": 4500,
+            "pair": {"kept": True, "names": ["Te One", "Wr Three"], "text": text},
+        },
+    }
+    check = {c.key: c for c in ls.checklist(edge(), [lineup()], None, MORNING, cash_core=core)}["pair"]
+    assert check.detail == "L1: " + text

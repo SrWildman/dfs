@@ -905,3 +905,41 @@ def test_the_drawers_game_log_carries_target_share_and_red_zone_looks(tmp_path):
             "DK": 22.4,
         }
     ]
+
+
+def test_the_cash_board_flags_a_cheap_pair_with_the_lineup_without_it_one_click_away(full):
+    """Sam's Week 11 note (`cash_pairs`): the flag's one line, and the lineup without the pair as a difference
+    behind it; a pair the Default avoided is flagged too, with what the rule changed."""
+    from dfs import week_top
+
+    text = (
+        "Two cheap SEA RBs (Filler 0 $4,000, Filler 1 $4,000): +2.1 pts over the best lineup without Filler 1"
+    )
+    core = cash_core_payload()
+    core["cheap_pair"] = {
+        "cheap_salary": 6000,
+        "pair": {
+            "kept": True, "why": "earns", "names": ["Filler 0", "Filler 1"], "keep": "Filler 0", "text": text,
+            "gain": 2.1, "margin": 1.5,
+            "change": {"kept": True, "projection": 129.2, "salary": 49600, "from_projection": 131.3,
+                       "swaps": [{"out": "Filler 1", "in": "Kenneth Walker", "position": "RB",
+                                  "d_points": -2.1, "d_salary": -1600}]},
+        },
+    }  # fmt: skip
+    board = html.unescape(week_top.cash_board_html(core, [], {}, live=False))
+    assert '<details class="pairflag"><summary>' + text + "</summary>" in board
+    flat = " ".join(re.sub(r"<[^>]+>", " ", board).split())
+    assert "The best lineup without them: 129.2 pts, $49,600." in flat
+    assert "Filler 1 → Kenneth Walker -2.1 pts -$1,600 freed" in flat
+    avoided = (
+        "Two cheap SEA RBs (...): Filler 1 out, Filler 0 kept (...); the pair was only +0.4 pts over ..."
+    )
+    core["cheap_pair"]["pair"].update(kept=False, text=avoided)
+    core["cheap_pair"]["pair"]["change"].update(kept=False, projection=131.3, from_projection=131.7)
+    board = html.unescape(week_top.cash_board_html(core, [], {}, live=False))
+    assert '<details class="pairflag avoided"><summary>' + avoided in board
+    assert "The lineup with them was 131.7 pts; the Default: 131.3 pts" in " ".join(
+        re.sub(r"<[^>]+>", " ", board).split()
+    )
+    core.pop("cheap_pair")
+    assert "pairflag" not in week_top.cash_board_html(core, [], {}, live=False)  # an older build: nothing

@@ -117,6 +117,9 @@ class LeafRules:
     need_one_of: frozenset[str] | None = None  # at least one of these names (None: no such rule)
     max_per_game: int | None = None  # at most this many players from one game
     stacks: Any = None  # `suggest_state.StackRules` (no_stack / no_bring_back / only), or None
+    # at most one RB/WR/TE under this salary from one team (`cash_pairs`, the cash Default's "no cheap
+    # pair" search; None: no such rule)
+    cheap_salary: int | None = None
 
 
 def described(test: Callable, rules: LeafRules) -> Callable:
@@ -335,6 +338,10 @@ def exact_top_lineups(
     held = list(state.fixed.values())
     if rules is not None and rules.max_per_game is not None:
         feasible = _within_game_limit(feasible, rules.max_per_game)
+    if rules is not None and rules.cheap_salary:
+        from dfs import cash_pairs
+
+        feasible = cash_pairs.feasible(rules.cheap_salary, feasible)
     whole = len(state.fixed) + len(state.open) == len(ROSTER_SLOTS)
     if shape is None or qb is None or not whole or not any(p.name == qb.name for p in held):
         return budgeted_top_lineups(

@@ -725,10 +725,13 @@ def checklist(
     now: datetime,
     *,
     where: str = "",
+    cash_core: dict | None = None,
 ) -> list[Check]:
-    """The four lines: (1) no OUT, IR or Doubtful player in any lineup; (2) late-game players sit in
+    """The five lines: (1) no OUT, IR or Doubtful player in any lineup; (2) late-game players sit in
     FLEX-eligible slots; (3) every contest has an entry; (4) salary: over the cap, or `SALARY_SLACK` or more
-    unspent. `where` names the lineups' source when it is not the entered record."""
+    unspent; (5) no cheap same-team pair in a cash lineup (`cash_pairs`, the salary line from `cash_core`'s
+    `cheap_pair`; the Default's own pair says what it earns). `where` names the lineups' source when it is
+    not the entered record."""
     edge = list(edge or [])
     by_name = _by_name(edge)
     sources = unique_labels(sources)
@@ -741,6 +744,7 @@ def checklist(
             Check("flex", None, "Late-game players sit in FLEX-eligible slots", none),
             Check("entries", None, "Every contest has an entry", none),
             Check("salary", None, "Salary sanity", none),
+            Check("pair", None, PAIR_TEXT, none),
         ]
     bad = [
         (lc.source.label, f, inactives.STATUS_WORD[f.status])
@@ -832,7 +836,47 @@ def checklist(
             )
         )
         out.append(Check("salary", not over and not slack, "Salary sanity", detail + tail))
+    out.append(pair_check(sources, by_name, cash_core, tail))
     return out
+
+
+PAIR_TEXT = "No cheap same-team pair in a cash lineup"
+
+
+def pair_check(
+    sources: Sequence[inactives.Source], by_name: Mapping[str, dict], cash_core: dict | None, tail: str = ""
+) -> Check:
+    """The cheap-pair flag (`cash_pairs`, Sam's Week 11 note) on every cash lineup: two RB / WR / TE from one
+    team both under the line. Information, like every check: the lineup stays his."""
+    from dfs import cash_pairs
+
+    cp = (cash_core or {}).get("cheap_pair") or {}
+    line = int(cp.get("cheap_salary") or cash_pairs.CHEAP_SALARY)
+    kept = cp.get("pair") or {}
+    default = set(((cash_core or {}).get("default") or {}).get("names") or [])
+    cash = [s for s in sources if s.kind == "cash"]
+    if not cash:
+        return Check("pair", None, PAIR_TEXT, "no cash lineup" + tail)
+    flags = []
+    for src in cash:
+        names = [str(n) for n in src.names if str(n).strip()]
+        rows = {n: r for n in names if (r := by_name.get(normalize_name(n))) is not None}
+        for found in cash_pairs.pairs(cash_pairs.from_rows(names, rows), line):
+            text = cash_pairs.CheapPair(found, True, cash_pairs.EARNS, None).what
+            if (
+                kept.get("kept")
+                and set(names) == default
+                and {p.name for p in found} == set(kept.get("names") or [])
+            ):
+                text = kept.get("text") or text  # the Default's own: what it earns over the best without
+            flags.append(f"{src.label}: {text}")
+    n = len(cash)
+    return Check(
+        "pair",
+        not flags,
+        PAIR_TEXT,
+        ("; ".join(flags) if flags else f"none of {n} cash lineup{'s' if n != 1 else ''} holds one") + tail,
+    )
 
 
 # -- the late window ---------------------------------------------------------------------------------------
@@ -1117,7 +1161,7 @@ def view(inp, live_lineups: list[dict] | None = None) -> LockView:  # noqa: ANN0
         default_names=default,
         status_seen=last_status_change(inp.changes),
     )
-    checks = checklist(inp.edge, sources, entered, inp.now, where=where)
+    checks = checklist(inp.edge, sources, entered, inp.now, where=where, cash_core=inp.cash_core)
     late = late_window(inp.edge, sources, inp.now)
     synced = last_sync(inp.manifest)
     answered = answers(inp.decisions_log)

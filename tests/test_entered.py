@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from dfs import entered, suggest_state
 from dfs.entries import Entry, FileEntry, SheetLineup, TablePlayer
+from dfs.kickoff import parse_kickoff
 
 NINE = ["Dak Prescott", "Rhamondre Stevenson", "Jonah Coleman", "CeeDee Lamb", "Zay Flowers", "Puka Nacua"]
 NINE += ["Mason Taylor", "Hunter Henry", "Broncos"]
@@ -121,3 +122,93 @@ def test_an_old_record_without_blank_entries_still_loads(tmp_path):
     path = tmp_path / "old.json"
     path.write_text(json.dumps({"season": 2026, "week": 8, "recorded_at": "t", "source": "s", "lineups": []}))
     assert ent.load(2026, 8, path).blank == []
+
+
+# -- recording again after late swap (Sam's Week 11 note) --------------------------------------------------
+
+LOCK = "2026-11-01T17:00:00+00:00"  # the slate's first kickoff
+
+
+def _lineup(names, *entry_ids, fmt="Double Up", fee="$5"):
+    contests = [entered.Contest("c" + i, "DU", fee, fmt, [i]) for i in entry_ids]
+    return entered.EnteredLineup(names=list(names), contests=contests)
+
+
+def _record(at, *lineups, kickoff=LOCK):
+    return entered.EnteredRecord(2026, 8, at, "entries file x", list(lineups), first_kickoff=kickoff)
+
+
+SWAPPED = [*NINE[:3], "Malik Nabers", *NINE[4:]]  # the WR slot (CeeDee Lamb) swapped late
+
+
+def test_a_re_record_replaces_the_week_and_keeps_every_version_append_only(tmp_path):
+    path = tmp_path / "2026-wk08.json"
+    early = _record("2026-11-01T16:00:00+00:00", _lineup(NINE, "1", "2"))
+    final = _record("2026-11-01T20:30:00+00:00", _lineup(SWAPPED, "1", "2"))
+    entered.save(early, path)
+    entered.save(final, path)
+    assert entered.load(2026, 8, path) == final  # the record is the final lineups
+    history = entered.history_path(path)
+    assert history.name == "2026-wk08.history.jsonl" and len(history.read_text().splitlines()) == 2
+    assert entered.versions(2026, 8, path) == [early, final]
+    assert not early.after_lock and final.after_lock
+    assert entered.before_lock(2026, 8, path) == early  # the lineups as entered, before any late swap
+    entered.save(final, path)  # recording the same again appends, never rewrites
+    assert len(history.read_text().splitlines()) == 3
+
+
+def test_a_week_recorded_before_the_history_existed_is_its_one_version(tmp_path):
+    path = tmp_path / "2026-wk08.json"
+    old = _record("2026-11-01T16:00:00+00:00", _lineup(NINE, "1"), kickoff="")
+    path.write_text(__import__("json").dumps(__import__("dataclasses").asdict(old)))
+    assert entered.versions(2026, 8, path) == [old]
+    assert entered.before_lock(2026, 8, path) is None  # no lock time known: never guessed
+    assert entered.versions(2026, 9, tmp_path / "2026-wk09.json") == []
+
+
+def test_what_changed_is_said_lineup_by_lineup():
+    other = [f"G{i}" for i in range(9)]
+    old = _record("a", _lineup(NINE, "1", "2"), _lineup(other, "3", fmt="SE GPP", fee="$15"))
+    new = _record("b", _lineup(SWAPPED, "1", "2"), _lineup(other, "3", fmt="SE GPP", fee="$15"))
+    assert entered.changes(old, new) == [
+        "  #1 (Double Up $5 x2): WR CeeDee Lamb -> Malik Nabers",  # the slot, from DK's slot order
+        "  #2 (SE GPP $15): unchanged",
+    ]
+    assert entered.changes(old, old) == []  # nothing changed: the caller says so
+    gone = entered.changes(old, _record("b", _lineup(other, "3", fmt="SE GPP", fee="$15")))
+    assert gone[-1].startswith("  no longer entered: Dak Prescott")
+    added = entered.changes(_record("a"), _record("b", _lineup(NINE, "1")))
+    assert added == [f"  #1 (Double Up $5): new, {', '.join(NINE)}"]
+
+
+def test_a_late_swap_is_paired_by_its_entries_and_the_lineups_tab_by_label():
+    # the swapped lineup shares only 4 players with the old one, but holds the same DK entries
+    far = [*NINE[:4], "A", "B", "C", "D", "E"]
+    old = _record("a", _lineup(NINE, "7"))
+    assert "new" not in entered.changes(old, _record("b", _lineup(far, "7")))[0]
+    tab_old = _record("a", entered.EnteredLineup(names=list(NINE), label="L2"))
+    tab_new = _record("b", entered.EnteredLineup(names=far, label="L2"))
+    assert entered.changes(tab_old, tab_new)[0].startswith("  L2: ")
+
+
+def test_a_lineup_in_many_contests_is_labelled_by_its_biggest_groups():
+    lu = _lineup(NINE, "1", "2", "3", fmt="H2H", fee="$2")
+    lu.contests += [entered.Contest(f"x{i}", "n", f"${i}", f"F{i}", [f"y{i}"]) for i in range(4)]
+    assert entered.lineup_label(lu, 4) == "#4 (H2H $2 x3, F0 $0, F1 $1 +2 more)"
+
+
+def test_a_file_after_lock_is_this_weeks_by_its_player_ids_and_keeps_the_lock_time():
+    players = [_player(i, n) for i, n in enumerate(NINE)]
+    rows = [{"Id": p.dk_id, "GameStart": "2026-11-01T18:00:00Z"} for p in players]  # EdgeRaw's format
+    assert entered.on_synced_slate(players, rows)
+    assert not entered.on_synced_slate(players, rows[:7])  # 7 of 9 is not this slate
+    assert not entered.on_synced_slate([], rows)
+    # the earliest of the file's kickoffs, the synced slate's and the replaced record's
+    no_times = [
+        TablePlayer("WR", n, str(100 + i), "WR/FLEX", 5000, "", "DEN", None) for i, n in enumerate(NINE)
+    ]
+    synced = parse_kickoff("2026-11-01T18:00:00Z").isoformat(timespec="seconds")
+    assert entered.first_kickoff(no_times, rows) == synced
+    previous = _record("a", kickoff="2026-11-01T12:30:00+00:00")  # earlier than the synced slate's
+    assert entered.first_kickoff(no_times, rows, previous) == "2026-11-01T12:30:00+00:00"
+    assert entered.first_kickoff(no_times) == ""

@@ -183,6 +183,11 @@ color:var(--ink-2);font-size:13px;text-decoration:none;white-space:nowrap}
 .empty{color:var(--ink-2);margin:0;padding:0 16px 12px}
 .btn-primary{background:var(--accent);border-color:var(--accent);color:var(--on-fill);font-weight:600}
 .crow.chead{text-transform:none;font-size:12px;color:var(--ink-3)}
+.pairflag{margin:6px 0 10px;padding:6px 10px;border-radius:8px;background:var(--warn-soft);color:var(--ink)}
+.pairflag summary{cursor:pointer}
+.pairswaps{list-style:none;margin:6px 0 0;padding:0}
+.pairswaps li{display:grid;grid-template-columns:3em 1fr auto auto;gap:10px;align-items:baseline;
+padding:2px 0}
 .slotrow{grid-template-columns:40px minmax(0,1fr) auto 18px}
 .sec-h .howtip{font-size:12px}
 .dfold>.howtip{display:block;padding:0 16px 4px;font-size:12px}

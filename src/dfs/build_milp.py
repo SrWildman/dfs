@@ -313,6 +313,16 @@ def _rb_dst_rows(m: Model, held: list[SwapPlayer]) -> None:
 
 
 def _rule_rows(m: Model, held: list[SwapPlayer], rules: LeafRules) -> None:
+    if rules.cheap_salary:  # `cash_pairs`: at most one cheap RB/WR/TE a team
+        from dfs import cash_pairs
+
+        def cheap(p: SwapPlayer) -> bool:
+            return cash_pairs.is_cheap(p, rules.cheap_salary)
+
+        fixed = Counter(p.team for p in held if cheap(p))
+        for team in {p.team for p in m.players if cheap(p)} | set(fixed):
+            group = [i for i in range(m.n) if m.players[i].team == team and cheap(m.players[i])]
+            m.row(m.count(group, fixed[team]), hi=1)
     if rules.need_one_of is not None:
         marked = [i for i in range(m.n) if m.players[i].name in rules.need_one_of]
         m.row(m.count(marked, sum(1 for p in held if p.name in rules.need_one_of)), lo=1)

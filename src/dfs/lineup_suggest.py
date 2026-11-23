@@ -54,14 +54,14 @@ among tied lineups can then not depend on iteration order or on how the machine 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 import pandas as pd
 
 from dfs import cash_core as cash_core_mod
-from dfs import chalk_watch
+from dfs import cash_pairs, chalk_watch
 from dfs import lineup_shapes as shapes_mod
 from dfs import search_clock as clock
 from dfs.build_exact import LeafRules, described, top_lineups  # the search, by the solver in use
@@ -157,6 +157,8 @@ class SuggestReport:
     rank: str = DEFAULT_RANK  # what ordered the GPP candidates ("top1" or "share")
     # The Default cash lineup, its core and its open spots (`cash_core.py`; None without a cash search)
     cash_core: cash_core_mod.CashCore | None = None
+    # the cheap same-team pair the Default holds (flagged) or avoided (a note) (`cash_pairs`)
+    cheap_pair: cash_pairs.CheapPair | None = None
     cash_band: str = ""  # the Default's band ("lean: cash builds have cashed 14 of 25"); never a percentage
     # The iterate state shown on the tab (`sheet_suggested`): which round this is, the typed rules box (label
     # -> text, carried from the tab) and the one-line history of every round.
@@ -256,13 +258,15 @@ def cash_lineups(
     deadline: float | None = None,
     fixed: Sequence[SwapPlayer] = (),
     leaf_ok: Callable[[Sequence[SwapPlayer]], bool] | None = None,
+    feasible: Callable[[list[SwapPlayer], list[str]], bool] | None = None,
 ) -> tuple[list[list[SwapPlayer]], bool]:
     """The best `k` legal lineups from `pool` by projection (any shape), best first. `fixed` players (an
-    iterate rerun's locks) are in every lineup; `leaf_ok` is an extra test a finished lineup must pass."""
+    iterate rerun's locks) are in every lineup; `leaf_ok` is an extra test a finished lineup must pass and
+    `feasible` cuts a branch that cannot pass it (`cash_pairs`)."""
     remaining = None if deadline is None else max(0.0, deadline - clock.now())
     if not fixed:
         found, complete = top_lineups(
-            _all_open_state(cap), pool, k=k, leaf_filter=leaf_ok, time_limit=remaining
+            _all_open_state(cap), pool, k=k, leaf_filter=leaf_ok, feasible=feasible, time_limit=remaining
         )
         return [[a[i] for i in range(len(ROSTER_SLOTS))] for a in found], complete
     seated = shapes_mod.seat(list(fixed))
@@ -279,9 +283,76 @@ def cash_lineups(
         [p for p in pool if p.name not in names],
         k=k,
         leaf_filter=leaf_ok,
+        feasible=feasible,
         time_limit=remaining,
     )
     return [[*seated.values(), *a.values()] for a in found], complete
+
+
+PAIR_SEARCH_SECONDS = 20.0  # the "no cheap pair" cash search's own budget when the first one used the share
+
+
+def cash_candidates(
+    pool: list[SwapPlayer],
+    *,
+    cap: int,
+    deadline: float | None = None,
+    fixed: Sequence[SwapPlayer] = (),
+    leaf_ok: Callable[[Sequence[SwapPlayer]], bool] | None = None,
+    cheap_salary: int = cash_pairs.CHEAP_SALARY,
+    pair_margin: float = cash_pairs.PAIR_MARGIN,
+    own: Mapping[str, float] | None = None,
+) -> tuple[list[list[SwapPlayer]], bool, cash_pairs.CheapPair | None]:
+    """The cash search (`cash_lineups`) with the cheap-pair rule (`cash_pairs`, Sam's Week 11 note): when
+    the best lineup holds two cheap players from one team, the search runs again without such a pair,
+    keeping the pair's most-owned player in cash (`own`, `cash_ownership`), and those lineups are the
+    candidates unless the pair beats them by more than `pair_margin`. Returns (lineups, finished, the pair
+    kept or avoided)."""
+    lineups, done = cash_lineups(pool, cap=cap, deadline=deadline, fixed=fixed, leaf_ok=leaf_ok)
+    finished = [done]
+
+    def search_free(keep: tuple[SwapPlayer, ...]) -> list[list[SwapPlayer]]:
+        until = (
+            clock.now() + PAIR_SEARCH_SECONDS
+            if deadline is None
+            else max(deadline, clock.now() + PAIR_SEARCH_SECONDS)
+        )
+        free, free_done = cash_lineups(
+            pool,
+            cap=cap,
+            deadline=until,
+            fixed=[*fixed, *(p for p in keep if p.name not in {f.name for f in fixed})],
+            leaf_ok=cash_pairs.leaf(cheap_salary, leaf_ok),
+            feasible=cash_pairs.feasible(cheap_salary),
+        )
+        finished.append(free_done)
+        return free
+
+    chosen, pair = cash_pairs.choose(
+        lineups,
+        search_free,
+        fixed=[p.name for p in fixed],
+        own=own,
+        cheap_salary=cheap_salary,
+        margin=pair_margin,
+    )
+    return chosen, all(finished), pair
+
+
+def cash_ownership(edge: pd.DataFrame) -> dict[str, float]:
+    """`{Name: cash ownership}` for the cheap-pair rule's keeper: `CashOwn` (the double-up field's), else
+    `Own%` where CashOwn is blank; empty before ownership publishes (then no one is kept by ownership)."""
+    own: dict[str, float] = {}
+    if "Name" not in edge.columns:
+        return own
+    for column in ("CashOwn", "Own%"):
+        if column not in edge.columns:
+            continue
+        for name, value in zip(edge["Name"], pd.to_numeric(edge[column], errors="coerce"), strict=True):
+            key = str(name or "").strip()
+            if key and key not in own and pd.notna(value):
+                own[key] = float(value)
+    return own
 
 
 def stacked_lineups(
@@ -754,6 +825,8 @@ def suggest_builds(
     cash_fixed: Sequence[str] = (),
     gpp_dup_shares: dict[str, float] | None = None,
     cash_never: Sequence[str] = (),
+    cheap_salary: int = cash_pairs.CHEAP_SALARY,
+    cheap_pair_margin: float = cash_pairs.PAIR_MARGIN,
 ) -> SuggestReport:
     """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both).
     `field` (from `sim_inputs.resolve_lines`) scores against lines that move with the slate; without it the
@@ -799,11 +872,21 @@ def suggest_builds(
     if cash_builds:
         t = time.monotonic()
         fixed = [p for p in cash_pool if p.name in set(cash_fixed)]
-        lineups, done = cash_lineups(cash_pool, cap=cap, deadline=cash_deadline, fixed=fixed)
+        lineups, done, report.cheap_pair = cash_candidates(
+            cash_pool,
+            cap=cap,
+            deadline=cash_deadline,
+            fixed=fixed,
+            cheap_salary=cheap_salary,
+            pair_margin=cheap_pair_margin,
+            own=cash_ownership(edge),
+        )
         report.complete = report.complete and done
         report.cash_core = cash_core_mod.cash_core(
             lineups, cash_pool, cap=cap, kickoff=kickoff, k=CASH_TOP_K, complete=done
         )
+        if report.cheap_pair is not None:
+            report.notes.append("Cash: " + report.cheap_pair.text)
         t = timed("search", t)
         # Chosen by projection (`cash_key`): only the chosen ones are simulated (the Default's band, and what
         # the Total row and the saved round keep), never the whole top 300.

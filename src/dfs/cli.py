@@ -3054,9 +3054,12 @@ def entries_record(
 
     Reads DK's entries file (download it from DraftKings' Edit entries after you have entered; Classic
     main-slate entries only) or, with none, the Lineups tab (lineups only: the tab does not know the
-    contests). Writes `data/entered/<season>-wk<NN>.json` (re-running replaces it); `dfs week close` warns
-    when the week has none, and its cash post-mortem compares the entered cash lineup to the nearest
-    build. Never writes a sheet."""
+    contests). Writes `data/entered/<season>-wk<NN>.json`. Recording again after late swap is the normal
+    path: it replaces the record with the final lineups, says what changed lineup by lineup, and keeps every
+    version in `<season>-wk<NN>.history.jsonl` beside it (append-only), so the lineups from before lock are
+    kept. A file downloaded after lock reads too (DK marks a locked player `(LOCKED)` and shows no kickoff
+    for a game under way). `dfs week close` warns when the week has none, and its cash post-mortem compares
+    the entered cash lineup to the nearest build. Never writes a sheet."""
     from dfs import entered
     from dfs import entries as ent
     from dfs import sheet_dk_upload as dku
@@ -3071,6 +3074,7 @@ def entries_record(
         raise typer.Exit(code=1) from e
     week, season = _suggest_week(title), current_season()
     console.print(f"Sheet: [bold]{title}[/bold] (Week {week})\n{url}\n")
+    previous = entered.load(season, week)  # the record this one replaces, if the week has one
 
     path = None
     if not from_sheet:
@@ -3088,6 +3092,14 @@ def entries_record(
             console.print(f"[red]{escape(str(e))}[/red]")
             raise typer.Exit(code=1) from e
         found = entered.file_week(parsed.players)
+        synced = entered.synced_rows()
+        if found is None and entered.on_synced_slate(parsed.players, synced):
+            # after lock DK shows "Final" / "In Progress" for every kickoff: its player ids are this week's
+            found = (season, week)
+            console.print(
+                "[dim]The file shows no kickoff times (games under way): its players are this week's synced "
+                "slate, so it is this week's.[/dim]"
+            )
         if found != (season, week):
             seen = f"Week {found[1]} of {found[0]}" if found and found[1] else "no week"
             console.print(
@@ -3106,6 +3118,7 @@ def entries_record(
             blank=entered.blank_entries(kept),
             skipped_fees=ent.skipped_fees(parsed),
             h2h=_h2h_answer(h2h, ent.has_h2h(kept), season, week),
+            first_kickoff=entered.first_kickoff(parsed.players, synced, previous),
         )
     else:
         try:
@@ -3113,17 +3126,36 @@ def entries_record(
         except SheetsError as e:
             console.print(f"[red]Sheets error:[/red] {e}")
             raise typer.Exit(code=1) from e
-        record = entered.make_record(season, week, f"Lineups tab of {title}", entered.from_sheet(sheet))
+        record = entered.make_record(
+            season,
+            week,
+            f"Lineups tab of {title}",
+            entered.from_sheet(sheet),
+            first_kickoff=entered.first_kickoff([], entered.synced_rows(), previous),
+        )
     if not record.lineups:
         console.print("[yellow]No entered lineup found: nothing to record.[/yellow]")
         raise typer.Exit(code=1)
     for line in entered.summary_lines(record):
         console.print(escape(line), highlight=False, soft_wrap=True)
+    if previous is not None:
+        # recording again (after late swap, the normal path): the final lineups replace the record, the
+        # earlier one stays in the history beside it
+        when = "after lock" if record.after_lock else "before lock"
+        console.print(
+            f"\nReplaces the record of {escape(previous.recorded_at)} ({len(previous.lineups)} lineup(s), "
+            f"{'after' if previous.after_lock else 'before'} lock) with these, recorded {when}. What changed:"
+        )
+        diff = entered.changes(previous, record)
+        for line in diff or ["  nothing: the same lineups"]:
+            console.print(escape(line), highlight=False, soft_wrap=True)
     if dry_run:
         console.print("[dim]Dry run: nothing was written.[/dim]")
         return
     out = entered.save(record)
     console.print(f"[green]Recorded to {out}[/green]")
+    if previous is not None:
+        console.print(f"[dim]Every version is kept in {entered.history_path(out).name} (append-only).[/dim]")
     _save_ledger(cfg, season, week, through=week - 1, record=record)
 
 
@@ -4226,6 +4258,8 @@ def _run_suggest(
             gpp_entries=gpp_entries,
             double_up_entries=double_up_entries,
             rank=rank,
+            cheap_salary=_cash_cfg(cfg).cheap_salary,
+            cheap_pair_margin=_cash_cfg(cfg).cheap_pair_margin,
         )
         report.builds = [
             dataclasses.replace(b, note="; ".join(t for p in b.players if (t := frame.tag(p.name))))
@@ -4265,6 +4299,8 @@ def _run_suggest(
             double_up_entries=double_up_entries,
             rank=rank,
             bring_back_gain=gain,
+            cheap_salary=_cash_cfg(cfg).cheap_salary,
+            cheap_pair_margin=_cash_cfg(cfg).cheap_pair_margin,
             freeze=restored is not None,
             only=only,
         )
@@ -4298,7 +4334,9 @@ def _run_suggest(
                 rec.metrics["p_cash_shown"] = round(float(shown[rec.number]), 4)
     else:
         shown = {}
-    core_payload = _cash_core_payload(report, record, edge, shown, tab, now=now)
+    core_payload = _cash_core_payload(
+        report, record, edge, shown, tab, now=now, cheap_salary=_cash_cfg(cfg).cheap_salary
+    )
     how = {"suggest": "fresh run", "iterate": "rerun", "restore": f"round {restored} restored"}[command]
     console.print(
         f"Round {record.round} ({how}). Pool: {report.candidates.get('cash', 0)} player(s) for Cash builds, "
@@ -4393,7 +4431,16 @@ def _du_line_offset() -> tuple[float | None, tuple[int, ...]]:
     return (cal.offset, tuple(cal.weeks)) if cal is not None else (None, ())
 
 
-def _cash_core_payload(report, record, edge, shown: dict, tab, *, now: datetime) -> dict | None:  # noqa: ANN001
+def _cash_cfg(cfg):  # noqa: ANN001, ANN202
+    """`[cash]` (the cheap-pair rule), its defaults when the config has none."""
+    from dfs.config import CashConfig
+
+    return getattr(cfg, "cash", None) or CashConfig()
+
+
+def _cash_core_payload(  # noqa: ANN001
+    report, record, edge, shown: dict, tab, *, now: datetime, cheap_salary: int = 5000
+) -> dict | None:
     """The Default cash lineup's week input (`cash_core.payload`), kept on the round too, and its band on the
     report (the Suggested tab's status line). None when the run built no cash lineup."""
     from dfs import cash_core as cc
@@ -4432,6 +4479,9 @@ def _cash_core_payload(report, record, edge, shown: dict, tab, *, now: datetime)
         faded=sorted(n for n in rules.never_for("cash") if n not in default),
         flex_order="OK" if plan.status in ("ok", "keep", "none") else plan.status,
     )
+    from dfs import cash_pairs
+
+    payload["cheap_pair"] = cash_pairs.payload(report.cheap_pair, core.default, cheap_salary)
     record.cash_core = payload
     return payload
 
