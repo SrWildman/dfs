@@ -181,6 +181,15 @@ solver = "search"
 cheap_salary = 6000
 cheap_pair_margin = 1.5
 
+# A small slate (its game count, not its day: Thanksgiving, Saturdays, Christmas, every playoff slate). At
+# max_games or fewer, chalk is the slate's own top 10% of projected double-up ownership (never under 30%),
+# and these rules are off unless set true: the cheap-pair rule (the pair is still flagged), and the builders'
+# one RB a game / no DST against his own QB. A main slate is unchanged.
+[small_slate]
+max_games = 4
+cheap_pair = false
+hard_rules = false
+
 # Contest selection (dfs week close): where to find the two files you download from DraftKings by hand -- the
 # contest-entry history export and the per-contest "export full standings" files -- and which double-up's
 # standings fill Results' blank Cash Line (a value you typed is never overwritten).

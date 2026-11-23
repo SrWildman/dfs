@@ -40,7 +40,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from dfs import chalk_watch as cw
-from dfs import late_swap_store
+from dfs import late_swap_store, small_slate
 from dfs import lineup_watch as lw
 from dfs.derived import OUT_STATUSES, WIND_FLAG_THRESHOLD_MPH
 from dfs.entries import SheetLineup
@@ -536,6 +536,7 @@ def _warnings_block(b: _Builder, inputs: CockpitInputs, built: list[SheetLineup]
             if when is not None and when <= now:
                 started.add(row.Name)
     for goal, threshold in (("cash", cw.CASH_PROJECTED_OWN), ("gpp", cw.GPP_PROJECTED_OWN)):
+        threshold = small_slate.column_cut(edge, "Own%", threshold)  # a small slate: its own
         sets = [list(lineup.names) for lineup in built if _goal(lineup.marker) == goal]
         for chalk in cw.missing_chalk(edge, sets, threshold=threshold, started=started)[: cw.MAX_LISTED]:
             b.line(

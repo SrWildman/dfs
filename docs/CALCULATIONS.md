@@ -2635,3 +2635,36 @@ the game log, `player_log.csv`); status is DraftKings' on the slate (OUT / IR / 
 - **The brief** names, among players owned 15%+ in either format or priced $7,000+, up to three who catch from a backup
   and three who lead the targets with a teammate out, most owned first.
 
+## Small slates (`small_slate.py`, `[small_slate]`)
+
+A slate is **small** when its DraftKings draft group has `max_games` games or fewer (default 4): Thanksgiving, Saturday
+slates, Christmas and every playoff slate, the Sunday "main" of Wild Card, Divisional and Championship included. The count is
+the distinct `AWAY@HOME` pairs in the synced `draftkings.csv`'s `Game Info`. A frame (or the page's EdgeRaw rows) is judged
+small only when that draft group is small **and** the frame covers no more than `max_games` games, so a test fixture of a
+few teams, or a past main slate's frame read during a playoff week, keeps every main-slate number. A main slate is unchanged
+everywhere below.
+
+- **Ownership.** On a secondary slate, sync reads TFFB's own slate (`tffb_projections.pick_slate_name`: the one Classic
+  slate whose name says the day, never a range like "Thu-Mon"; none yet is pending, two is an error), so `Own%` is that
+  slate's, already concentrated and already summing to about 1 / 2.4 / 3.3 / 1.2 / 1 by position. On a small slate `GppOwn`
+  and `OurOwn` use `k = 1` for GPPs (`field_own.follow_tffb`: TFFB's shares, scaled to the position totals) instead of the
+  main-slate sharpening (`k` about 1.24), which is kept beside it as `ModelGppOwn` in `own_shadow.csv` (in the slate's
+  synced files, not on the sheet). `CashOwn` is the same double-up model as on a main slate (TFFB has no double-up number).
+  Untested on small slates: no small-slate standings exist yet.
+- **Chalk.** The fixed cuts become the slate's own: `slate_chalk_cut` = the 90th percentile of the slate's `CashOwn` among
+  players at 1%+ (at least 10 of them, else the fixed cut), never under the fixed cut. The page's 30% line (`week_plays.CHALK`:
+  chalk core, chalk you're not on, the cash chalk check, the brief, the board's hot cells, the Explorer's Chalk column) and the
+  plays model's chalk rule (`plays.CHALK`, saved on each call as `chalk_cut`) use it as is; a lower fixed cut scales by the
+  same ratio (`small_slate.cut`: `max(base, slate cut x base / 30%)`). EdgeRaw's `CHALK` flag (20% of `Own%`) and
+  `chalk_watch`'s warnings (20% / 25% of `Own%`) use the 90th percentile of `Own%` the same way (`column_cut`).
+- **Rules.** Off by default on a small slate: the cash Default's cheap-pair rule (`[small_slate] cheap_pair`; the pair is
+  still flagged, "kept, the cheap-pair rule is off on a small slate"), and the builders' one RB a game and no DST against
+  his own QB (`[small_slate] hard_rules`; `late_swap_search.relaxed_rules`, read by every solver and late swap). The sheet's
+  `Issues` column (a formula) still shows RB/GAME and DST-vs-QB. No rule forces the cap to be used.
+- **The cash line.** The same mechanics (the field average from the slate's own ownership, +`double_up_offset`), so the
+  builds still have a line to score against, but it is said to be **not calibrated**: the offset was fitted on main slates.
+  The Default's band has no word on a small slate ("small slate: line not calibrated; cash builds have cashed N of M").
+- **Copies.** The same ownership-product estimate (`sim/dups.py`, fitted on main-slate standings), so it rises with the
+  slate's ownership; each GPP build's copies and salary left are listed on the run ("a dupe lever": information, never a
+  rule). Untested on small slates.
+

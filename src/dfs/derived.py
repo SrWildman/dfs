@@ -73,6 +73,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from dfs import small_slate
 from dfs.line_movement import FLAG_IMPL_DOWN, FLAG_IMPL_UP, LINE_MOVE_FLAG_THRESHOLD
 from dfs.player_join import JoinResult, adopt_dk_spelling, join_source_to_dk, normalize_name
 from dfs.team_metrics import GAME_ENV_WEIGHTS, combined_by_game, weighted_mean_skipna
@@ -1243,7 +1244,7 @@ def _dst_nickname(full_team_name: str) -> str:
     return full_team_name.strip().rsplit(" ", 1)[-1]
 
 
-def _flags_for_row(row: pd.Series) -> list[str]:
+def _flags_for_row(row: pd.Series, chalk: float = CHALK_OWNERSHIP_THRESHOLD) -> list[str]:
     """Every matching flag, in priority order (most urgent first) -- a
     player who is both WIND and LEVERAGE showed only WIND under the old
     first-match-wins rule, silently hiding the second condition. All of
@@ -1266,7 +1267,7 @@ def _flags_for_row(row: pd.Series) -> list[str]:
         flags.append("LEVERAGE")
     # No ownership-published guard needed: ProjOwn reads 0 for everyone
     # until TFFB publishes it, so this can't fire before then regardless.
-    if row["ProjOwn"] >= CHALK_OWNERSHIP_THRESHOLD:
+    if row["ProjOwn"] >= chalk:
         flags.append("CHALK")
     # Part C, C5b: lowest priority, below CHALK -- "look closer," not
     # "danger," and per the spec's own explicit instruction, a new flag
@@ -1429,7 +1430,9 @@ def build_edge_frame(
     merged["Avail"] = merged["Status"].fillna("")
     merged = merged.drop(columns="Status")
 
-    flag_lists = merged.apply(_flags_for_row, axis=1)
+    # a small slate (`small_slate.py`): CHALK is the slate's own top 10% of Own%, never under the 20% line
+    chalk = small_slate.column_cut(merged, "ProjOwn", CHALK_OWNERSHIP_THRESHOLD)
+    flag_lists = merged.apply(_flags_for_row, axis=1, chalk=chalk)
     merged["Flags"] = flag_lists.apply(" ".join)
     # Part 7.9: "Flag" is just the single highest-priority token (empty
     # string, not NaN, when nothing fired -- consistent with "Flags").

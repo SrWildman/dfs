@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from dfs import kickoff, nfl_calendar, runlog, week_plays, week_today, week_tools
+from dfs import kickoff, nfl_calendar, runlog, small_slate, week_plays, week_today, week_tools
 from dfs.week_inputs import WeekInputs, data_root, gather, parse_time
 
 # Run after one of these commands succeeds. `dfs week new` is added to the planned list: a new week's
@@ -479,8 +479,9 @@ def _saved(inp: WeekInputs, payload: dict | None) -> str:
 
 def cash_chalk(inp: WeekInputs) -> tuple[list[dict] | None, int]:
     """Players the double-ups are expected to own at 30%+ (CashOwn), each with how many of the cash builds use
-    him. None when CashOwn is not out yet."""
+    him (a small slate: its own cut, `week_plays.slate_cut`). None when CashOwn is not out yet."""
     cash = builds_of(inp, "cash")
+    cut = week_plays.slate_cut(inp.edge)
     chalk = []
     published = False
     for r in inp.edge or []:
@@ -488,7 +489,7 @@ def cash_chalk(inp: WeekInputs) -> tuple[list[dict] | None, int]:
         if own is None:
             continue
         published = True
-        if own >= CHALK_THRESHOLD:
+        if own >= cut:
             used = sum(1 for b in cash if r["Name"] in b.get("names", []))
             chalk.append(
                 {
@@ -509,12 +510,14 @@ CLOSE_COUNT = 3  # the next ones under the line, shown as "close" (Plan N item 1
 
 
 def cash_close(inp: WeekInputs) -> list[dict]:
-    """The `CLOSE_COUNT` highest CashOwn players under the 30% line (shown as "close")."""
+    """The `CLOSE_COUNT` highest CashOwn players under the 30% line (shown as "close"; a small slate: its own
+    cut)."""
     cash = builds_of(inp, "cash")
+    cut = week_plays.slate_cut(inp.edge)
     under = []
     for r in inp.edge or []:
         own = num(r.get("CashOwn"))
-        if own is not None and own < CHALK_THRESHOLD:
+        if own is not None and own < cut:
             used = sum(1 for b in cash if r["Name"] in b.get("names", []))
             under.append(
                 {
@@ -618,7 +621,8 @@ def cash_section(inp: WeekInputs) -> Section:
     chalk, n_builds = cash_chalk(inp)
     close = cash_close(inp)
     count = f" ({len(chalk)})" if chalk is not None else ""
-    body.append(f"<h4>Cash chalk check: {e(CHALK_CHECK_HEADER)}{count} {_chip('cash_chalk')}</h4>")
+    header = CHALK_CHECK_HEADER.replace("30%", small_slate.percent(week_plays.slate_cut(inp.edge)))
+    body.append(f"<h4>Cash chalk check: {e(header)}{count} {_chip('cash_chalk')}</h4>")
     if chalk is None:
         body.append(
             not_run(

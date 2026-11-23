@@ -272,6 +272,7 @@ def iterate_builds(
     bring_back_gain: float = BRING_BACK_GAIN,
     cheap_salary: int = cash_pairs.CHEAP_SALARY,
     cheap_pair_margin: float = cash_pairs.PAIR_MARGIN,
+    enforce_pair: bool = True,
     freeze: bool = False,
     only: str | None = None,
 ) -> Iterated:
@@ -363,6 +364,7 @@ def iterate_builds(
                 cheap_salary=cheap_salary,
                 pair_margin=cheap_pair_margin,
                 own=ls.cash_ownership(edge),
+                enforce_pair=enforce_pair,
             )
             if report.cash_core is None:  # the first cash search is the Default's (`cash_core`)
                 report.cash_core = cash_core_mod.cash_core(

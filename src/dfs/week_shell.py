@@ -76,6 +76,22 @@ def slate_badge() -> str:
     return f' <b class="slate">· {e(slate.DAY_NAMES[slate.DAYS[slate.current()]])} slate</b>'
 
 
+def small_slate_html(inp: WeekInputs) -> tuple[str, str]:
+    """(` · 3-game slate` beside the week, the one-line note under the header) on a small slate
+    (`small_slate.py`); ("", "") on a main slate."""
+    from dfs import small_slate, week_plays
+
+    size = small_slate.rows_size(inp.edge)
+    if size is None or not size.small:
+        return "", ""
+    cut = small_slate.percent(week_plays.slate_cut(inp.edge))
+    note = small_slate.NOTE.replace("not a flat 30%", f"{cut} here, not a flat 30%")
+    return (
+        f' <b class="slate" title="{e(small_slate.NOTE)}">· {e(size.label)}</b>',
+        f'<p class="sub wk-meta small-slate">{e(note)} {e(small_slate.COPIES_NOTE)}</p>',
+    )
+
+
 def header_html(inp: WeekInputs, clock_state: str, live: bool, meta: str, stale: str) -> str:
     tabs = "".join(
         f'<a href="#{k}" data-view="{k}"{" class=on" if k == clock_state else ""}>{e(label)}'
@@ -88,13 +104,14 @@ def header_html(inp: WeekInputs, clock_state: str, live: bool, meta: str, stale:
         if live
         else ""
     )
+    badge, note = small_slate_html(inp)
     return (
-        f'<header class="wk-top"><div class="wk">Week {inp.week}{slate_badge()}<span>{e(kickoff.format_et(inp.now))}</span></div>'
+        f'<header class="wk-top"><div class="wk">Week {inp.week}{slate_badge()}{badge}<span>{e(kickoff.format_et(inp.now))}</span></div>'
         f'<nav id="views" class="daytabs" aria-label="Day views">{tabs}</nav>'
         '<div class="wk-tools"><span class="vsearch"><input id="psearch" type="search" placeholder="Find a player  /" '
         'autocomplete="off" aria-label="Find a player"><span id="psearch-list" class="srlist" hidden></span></span>'
         f"{ask}</div></header>"
-        f'<p class="sub wk-meta">{meta}</p>' + stale
+        f'<p class="sub wk-meta">{meta}</p>' + note + stale
     )
 
 

@@ -32,7 +32,9 @@ under 2 s) and checks the search against brute force.
 from __future__ import annotations
 
 import heapq
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -228,9 +230,33 @@ def _fits(slot: str, player: SwapPlayer) -> bool:
     return player.position in FLEX_POSITIONS if slot == "FLEX" else player.position == slot
 
 
+# The two hard rules below hold unless a small slate turned them off (`relaxed_rules`, `small_slate.py`):
+# with 6-8 teams, two RBs from one game and a QB against his own DST are ordinary small-slate builds.
+_HARD_RULES: ContextVar[bool] = ContextVar("hard_rules", default=True)
+
+
+def hard_rules() -> bool:
+    """True (the default, every main slate) when one RB a game and no DST against his QB apply."""
+    return _HARD_RULES.get()
+
+
+@contextmanager
+def relaxed_rules(relaxed: bool = True) -> Iterator[None]:
+    """Turn the two hard rules off for the block (a small slate's builds and late swap); `relaxed=False`
+    leaves them on, so a caller can pass its slate's answer straight in."""
+    token = _HARD_RULES.set(not relaxed)
+    try:
+        yield
+    finally:
+        _HARD_RULES.reset(token)
+
+
 def conflicts(player: SwapPlayer, placed: list[SwapPlayer]) -> bool:
     """True when putting `player` next to `placed` breaks a hard rule: a DST against your own QB, or a second
-    RB in one game (a FLEX RB counts: `position` is the player's real one, not the slot's)."""
+    RB in one game (a FLEX RB counts: `position` is the player's real one, not the slot's). Never on a small
+    slate that turned them off (`relaxed_rules`)."""
+    if not _HARD_RULES.get():
+        return False
     if player.position == "DST":
         return any(o.position == "QB" and o.team == player.opp for o in placed)
     if player.position == "QB":

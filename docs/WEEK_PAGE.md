@@ -140,6 +140,12 @@ More view and on Everything.
   before (`lock_state.saturday_night`). The server sets `DFS_SLATE`, so the chat's and the buttons' `dfs` commands
   work on the same slate, and the chat's prompt opens with a paragraph saying so (`week_chat.slate_note`). With no
   `--slate` nothing on the page changes.
+- A small slate (`small_slate.py`, 4 games or fewer by its draft group, on either key): the header adds "· 3-game
+  slate" beside the week and one line under it (`week_shell.small_slate_html`: chalk at the slate's own cut, the rules
+  that are off, copies untested). Every 30% chalk line on the page reads `week_plays.slate_cut(inp.edge)` instead
+  (chalk core, chalk you're not on, the cash chalk check and its header, the brief, the board's hot cells, the
+  Explorer's Chalk column), and the Default's band reads "small slate: line not calibrated". A main slate's page is
+  unchanged.
 
 - `dfs week serve [--week N] [--port P] [--no-open] [--sheet-id <id>] [--stop]` -- **the Week page as a local app** (`week_server.py`;
   the static `dfs week page` is unchanged): serves the page on this Mac only (`127.0.0.1`; the link it opens carries a

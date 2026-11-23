@@ -61,7 +61,7 @@ from datetime import datetime
 import pandas as pd
 
 from dfs import cash_core as cash_core_mod
-from dfs import cash_pairs, chalk_watch
+from dfs import cash_pairs, chalk_watch, small_slate
 from dfs import lineup_shapes as shapes_mod
 from dfs import search_clock as clock
 from dfs.build_exact import LeafRules, described, top_lineups  # the search, by the solver in use
@@ -302,6 +302,7 @@ def cash_candidates(
     cheap_salary: int = cash_pairs.CHEAP_SALARY,
     pair_margin: float = cash_pairs.PAIR_MARGIN,
     own: Mapping[str, float] | None = None,
+    enforce_pair: bool = True,
 ) -> tuple[list[list[SwapPlayer]], bool, cash_pairs.CheapPair | None]:
     """The cash search (`cash_lineups`) with the cheap-pair rule (`cash_pairs`, Sam's Week 11 note): when
     the best lineup holds two cheap players from one team, the search runs again without such a pair,
@@ -335,6 +336,7 @@ def cash_candidates(
         own=own,
         cheap_salary=cheap_salary,
         margin=pair_margin,
+        enforce=enforce_pair,
     )
     return chosen, all(finished), pair
 
@@ -827,6 +829,7 @@ def suggest_builds(
     cash_never: Sequence[str] = (),
     cheap_salary: int = cash_pairs.CHEAP_SALARY,
     cheap_pair_margin: float = cash_pairs.PAIR_MARGIN,
+    enforce_pair: bool = True,
 ) -> SuggestReport:
     """Everything `dfs lineups suggest` computes. `tags` maps a name to his pool tag (Cash / GPP / Both).
     `field` (from `sim_inputs.resolve_lines`) scores against lines that move with the slate; without it the
@@ -880,6 +883,7 @@ def suggest_builds(
             cheap_salary=cheap_salary,
             pair_margin=cheap_pair_margin,
             own=cash_ownership(edge),
+            enforce_pair=enforce_pair,
         )
         report.complete = report.complete and done
         report.cash_core = cash_core_mod.cash_core(
@@ -995,8 +999,12 @@ def suggest_builds(
 
     report.builds = number_builds(picked, gpp_entries=gpp_entries, double_up_entries=double_up_entries)
     for kind, threshold in (("cash", chalk_watch.CASH_PROJECTED_OWN), ("gpp", chalk_watch.GPP_PROJECTED_OWN)):
+        threshold = small_slate.column_cut(edge, "Own%", threshold)  # a small slate: its own
         sets = [[p.name for p in b.players] for b in report.builds if b.kind == kind]
-        line = chalk_watch.warning_line(chalk_watch.missing_chalk(edge, sets, threshold=threshold), kind=kind)
+        line = chalk_watch.warning_line(
+            chalk_watch.missing_chalk(edge, sets, threshold=threshold),
+            kind=kind,
+        )
         if line:
             report.notes.append(line.replace("your gpp", "your GPP"))
     for build in report.builds:

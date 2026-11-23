@@ -37,6 +37,7 @@ from dfs import (
     results_signals,
     signals,
     signals_data,
+    small_slate,
     store,
     usage_r6,
 )
@@ -208,7 +209,13 @@ def _enrich(
                 enriched["Id"].map(df.drop_duplicates("Id").set_index("Id")[column]), errors="coerce"
             )
     try:  # the ownership shadow: blank columns on any failure, never a failed sync
-        enriched = field_own.attach(enriched, field_own.load())
+        small = small_slate.frame_is_small(frame)  # the slate's own players: its own game count
+        model = field_own.load()
+        enriched = field_own.attach(enriched, model, small=small)
+        if small and write:  # small: TFFB's slate ownership shown, the main-slate model kept beside it
+            folder = store.current_dir()
+            folder.mkdir(parents=True, exist_ok=True)
+            field_own.shadow(enriched, model).to_csv(folder / field_own.SHADOW_FILE, index=False)
     except Exception as e:  # noqa: BLE001 - shadow columns must never fail the Edge Finder
         log.warning("Field ownership columns skipped: %s", e)
 

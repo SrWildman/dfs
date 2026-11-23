@@ -245,6 +245,7 @@ class Band:
     of: int | None
     line_offset: float | None
     line_weeks: tuple[int, ...] = ()
+    small: bool = False  # a small slate (`small_slate.py`): the line is not calibrated, so no word
 
     @property
     def record(self) -> str:
@@ -254,6 +255,10 @@ class Band:
 
     @property
     def text(self) -> str:
+        if self.small:
+            from dfs.small_slate import CASH_LINE_NOTE
+
+            return f"{CASH_LINE_NOTE}; {self.record}"
         if not self.word:
             return f"no band yet (ownership has not published); {self.record}"
         return f"{self.word}: {self.record}"
@@ -273,12 +278,16 @@ def band(
     record: tuple[int, int] | None,
     offset: float | None,
     weeks: Sequence[int] = (),
+    *,
+    small: bool = False,
 ) -> Band:
     """The Default's band: a word from its simulated chance against the measured line, beside the record
-    (cashed, scored) of every cash build so far."""
+    (cashed, scored) of every cash build so far. On a small slate (`small`) there is no word: the line was
+    measured on main slates only (the chance is still kept for the scorecard)."""
     cashed, of = record if record else (None, None)
     return Band(
-        word=band_word(shown),
+        small=small,
+        word="" if small else band_word(shown),
         shown=None if shown is None else round(float(shown), 4),
         cashed=cashed,
         of=of,
@@ -402,6 +411,7 @@ def payload(
                 "line_offset": band_.line_offset,
                 "line_weeks": list(band_.line_weeks),
                 "text": band_.text,
+                **({"small": True} if band_.small else {}),
             },
             "flex_order": flex_order,
             "players": [_player(p, details) for p in core.default],

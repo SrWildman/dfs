@@ -43,6 +43,18 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   Results and its standings out of `data/raw/dk_standings/` (`contests.capture.capture_standings(divert=...)`).
   Tests: `tests/test_slate.py`, `tests/test_slate_close.py`, `tests/sources/test_dk_salaries_slates.py`.
 
+- **Small slates** (`small_slate.py`, `[small_slate]`; `docs/CALCULATIONS.md` "Small slates"): small by game count
+  (`max_games`, default 4), read from the running slate's synced draft group (`small_slate.current`); a frame or
+  the page's rows count as small only when that draft group is small and they cover that few games too
+  (`frame_is_small`, `rows_cut`), so a fixture or a past main slate stays main. What it switches: the chalk cuts
+  (`week_plays.slate_cut` on the page, `plays.make_calls(chalk=)` for the live calls, `small_slate.column_cut` for
+  EdgeRaw's `CHALK` flag and `chalk_watch`'s warnings), `field_own.attach(small=True)` and its shadow
+  (`own_shadow.csv` beside the slate's synced files), the cheap-pair rule (`cash_pairs.choose(enforce=False)`),
+  the builders' two hard rules (`late_swap_search.relaxed_rules`, read by `conflicts` and `build_milp`), the cash
+  line's wording (`sim_inputs.SimLines.small`, `cash_core.Band.small`) and the page header
+  (`week_shell.small_slate_html`). A secondary slate's TFFB projections: `sources.tffb_projections.fetch_slate`
+  (`pick_slate_name`). Tests: `tests/test_small_slate.py`.
+
 ## Sync, sources and the news log
 
 - **The news change log** (`news_log.py` pure, `news_store.py` I/O; blueprint Phase C item 1): every `dfs sync`, `dfs sync --live` and
