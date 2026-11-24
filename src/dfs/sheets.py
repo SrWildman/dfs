@@ -866,6 +866,59 @@ class SheetsClient:
             )
         sheet.batch_update({"requests": requests})
 
+    def read_column_groups(self, tab_name: str) -> list[tuple[int, int, int, bool]]:
+        """Every column group on a tab as 0-indexed `(first, last, depth, collapsed)` (both ends inclusive),
+        outermost first, read from the sheet's own `columnGroups` metadata. The column twin of
+        `read_row_groups`, with the depth `get_column_groups` leaves out (nested groups need it)."""
+        sheet, ws = self._ws(tab_name)
+        meta = sheet.fetch_sheet_metadata(params={"fields": "sheets(properties(sheetId),columnGroups)"})
+        found: list[tuple[int, int, int, bool]] = []
+        for s in meta.get("sheets", []):
+            if s.get("properties", {}).get("sheetId") == ws.id:
+                for group in s.get("columnGroups", []) or []:
+                    rng = group["range"]
+                    found.append(
+                        (
+                            int(rng.get("startIndex", 0)),
+                            int(rng["endIndex"]) - 1,
+                            int(group.get("depth", 1)),
+                            bool(group.get("collapsed", False)),
+                        )
+                    )
+                break
+        return sorted(found, key=lambda g: (g[2], g[0]))
+
+    def apply_column_groups(self, tab_name: str, groups: list[tuple[int, int, int, bool]]) -> None:
+        """Create nested column groups `(first, last, depth, collapsed)` (0-indexed, inclusive) on a tab with
+        no column groups (`clear_column_groups` first), in one request. The column twin of `apply_row_groups`:
+        groups are added outermost first, so an inner group lands one level deeper than the one it sits in,
+        and the collapsed flags are set innermost first once every group exists."""
+        if not groups:
+            return
+        sheet, ws = self._ws(tab_name)
+
+        def span(first: int, last: int) -> dict:
+            return {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": first, "endIndex": last + 1}
+
+        ordered = sorted(groups, key=lambda g: (g[2], g[0]))
+        requests: list[dict] = [
+            {"addDimensionGroup": {"range": span(first, last)}} for first, last, _, _ in ordered
+        ]
+        for first, last, depth, collapsed in sorted(groups, key=lambda g: (-g[2], g[0])):
+            requests.append(
+                {
+                    "updateDimensionGroup": {
+                        "dimensionGroup": {
+                            "range": span(first, last),
+                            "depth": depth,
+                            "collapsed": collapsed,
+                        },
+                        "fields": "collapsed",
+                    }
+                }
+            )
+        sheet.batch_update({"requests": requests})
+
     def clear_row_groups(self, tab_name: str) -> None:
         """Row-dimension twin of `clear_column_groups` -- same reason it
         exists (`addDimensionGroup` nests a new group over an already-

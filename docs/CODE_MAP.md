@@ -140,6 +140,10 @@ Typed commands also ask for a missing required argument at a terminal (`prompt_m
   that is the tab's track record (`data/model_cache/stacks_retro.json`, several minutes; run it after `dfs week close`). Math in `stacks.py`
   (pure), layout `stacks_tab.py`, I/O `sheet_stacks.py`, retro `sim/stacks_retro.py`, live inputs `stacks_inputs.py`. A plain `dfs sync` refreshes the tab
   (about a minute; never on `--live`, never fails the sync); `dfs week new` refreshes it on the new sheet after its sync. An information view: the verdict on its leverage signal (`tested` / `weak` / `untested`) is on the tab.
+- `dfs setup lineup-columns [--sheet-id <id>]` -- folds Lineups down to its 17 build columns (`lineup_columns.VISIBLE`)
+  with collapsed column groups found by header, the five zones nested one level deeper inside (`lineup_columns`, pure;
+  `sheet_lineup_columns.fold`, I/O: idempotent, reads back). `setup link-edge` and `setup reorder-columns` re-apply it
+  (`cli._refold_lineup_columns`, fails soft). Template first, then each live sheet (`--slate thu` for a secondary slate's).
 - `dfs setup stacks [--sheet-id <id>]` -- creates (or rebuilds) the Stacks tab right after Suggested. Template first, then live, `dfs doctor` after
   (check `stacks-tab`). Needs `dfs stacks --refit` once.
 

@@ -88,6 +88,7 @@ WRITERS = frozenset(
         "dfs setup guard-empty-states",
         "dfs setup instructions",
         "dfs setup lineup-chalk",
+        "dfs setup lineup-columns",
         "dfs setup link-edge",
         "dfs setup other-sports",
         "dfs setup polish",

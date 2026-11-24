@@ -307,6 +307,18 @@ def link_edge_columns(
     # practice and lets Sam independently expand/collapse each one --
     # see `sheet_columns.py`'s own module docstring for why a label can't
     # live inside the range it names.
+    client.clear_column_groups(tab)
+    client.set_column_group_control_before(tab)
+    for start, end in zone_column_ranges(header):
+        client.group_columns(tab, column_letter(start), column_letter(end), collapsed=True)
+
+    return f"{tab}: linked {len(LINKED_EDGE_COLUMNS)} EdgeRaw column(s) ({len(missing)} newly created)"
+
+
+def zone_column_ranges(header: list[str]) -> list[tuple[int, int]]:
+    """The collapsed zones' column ranges in `header` (0-indexed, inclusive): GAME, CEILING DETAIL, MOVEMENT,
+    WEATHER and USAGE, each only where its members sit contiguous, and ranges that touch merged into one (see
+    `link_edge_columns`). Pure; `sheet_lineup_columns` nests these inside the Lineups fold."""
     zone_ranges: list[tuple[int, int]] = []
     for group in (GAME, CEILING_DETAIL, MOVEMENT, WEATHER, USAGE):
         indices = sorted(header.index(name) for name in group if name in header)
@@ -319,13 +331,7 @@ def link_edge_columns(
             merged_ranges[-1] = (merged_ranges[-1][0], end)
         else:
             merged_ranges.append((start, end))
-
-    client.clear_column_groups(tab)
-    client.set_column_group_control_before(tab)
-    for start, end in merged_ranges:
-        client.group_columns(tab, column_letter(start), column_letter(end), collapsed=True)
-
-    return f"{tab}: linked {len(LINKED_EDGE_COLUMNS)} EdgeRaw column(s) ({len(missing)} newly created)"
+    return merged_ranges
 
 
 # Phase 5D's Lineups-only "Vegas" group (O/U, Spread, Team Implied) and

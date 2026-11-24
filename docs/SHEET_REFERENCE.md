@@ -373,6 +373,17 @@ USAGE label columns). Which columns are numbers comes from `sheet_style.FIELD_FO
 column that is blank today aligns correctly when it fills (`sheet_style.column_alignment`).
 `Issues` is text with chips and is left like any other text. Applies to PlayerPoolRaw too.
 
+**Lineups in one window (audit item 1, Thanksgiving 2026 on):** `Lineups` shows 17 columns: `Name`, `Pos.`,
+`Team`, `Opp.`, `DK Sal`, `Pts`, `CalPts`, `Val`, `ValAdj`, `Hit3x%`, `Boom%`, `Ceil`, `Own%`, `Flags`, `Edge`,
+`Issues`, `Leverage` (the audit's 13, plus the four scoreboard columns `Val`..`Boom%` that hold Typical / Big
+night / Cash % / Top 1% on each Total row, and `Issues`; Sam, Nov 23). Every other column is folded into a
+collapsed column group (the + above the column letters; expand any by hand), found by header, never by letter
+(`lineup_columns.VISIBLE` / `fold_runs`). The GAME / CEIL / MOVE / WX / USAGE zones stay groups of their own,
+one level deeper inside the folds; CEIL is split around `Leverage` (`CeilPct` | `OwnStatus`..`CeilM`).
+`dfs setup lineup-columns` applies it (idempotent, reads it back); `dfs setup link-edge` / `reorder-columns`
+re-apply it, since they rebuild the tab's groups. Display only: no column moved, renamed or deleted. Player Pool
+and PlayerPoolRaw are unchanged.
+
 Where you actually build lineups. `Lineups` is still typed: type a
 player's name into the `Name` column of a roster slot, and every other
 column VLOOKUPs off that name against `PlayerPoolRaw`. `Lineups` repeats
