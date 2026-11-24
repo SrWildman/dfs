@@ -442,7 +442,8 @@ _TAB_ROWS: list[tuple[str, str]] = [
         "player, a salary problem, an incomplete lineup, a Cash lineup with a weak Cash %, or a FLEX that "
         "should hold a later kickoff. The Total row holds Typical, Big night, Cash % and "
         f"{TOP1_HEADER} and the Cash or GPP marker you set; the portfolio line is on the "
-        "Board.",
+        "Board. Only the columns you build from show; every other column is folded into a group: click the + "
+        "above the column letters to open one.",
     ),
     (
         "DK Upload",

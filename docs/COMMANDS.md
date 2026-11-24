@@ -779,6 +779,15 @@ Phase 3/6, one-time: moves PlayerPoolRaw, Player Pool and Lineups into `sheet_co
 | `--sheet-id STR` | Reorder a different sheet instead of config.toml's -- ALWAYS run against the canonical template first, verify with `dfs doctor`, then run again against the live sheet. |
 | `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
 
+### `dfs setup lineup-columns`
+
+Show only the Lineups columns you build from (Name, Pos., Team, Opp., DK Sal, Pts, CalPts, Val, ValAdj, Hit3x%, Boom%, Ceil, Own%, Flags, Edge, Issues, Leverage) and fold every other column into collapsed column groups, found by header. Expand any group by hand with the + above the column letters; the GAME, CEIL, MOVE, WX and USAGE zones stay groups of their own inside. Display only: nothing moves, is renamed or is deleted. Safe to re-run (a tab already folded is left alone); it reads the result back and says what it folded. Template first, then each live sheet (`--slate thu` for a secondary slate's).
+
+| Option | What it does |
+|---|---|
+| `--sheet-id STR` | Fold a different sheet instead of config.toml's, e.g. the canonical weekly template (always the template first). |
+| `--slate STR` | Which slate: main (the Sunday main slate, the default) or a secondary slate of the same week named by its day (thu, fri, sat, ...): its own sheet ([slates.<key>] in config.toml) and its own files under data/slates/<key>/. Default: `main`. |
+
 ### `dfs setup add-pool-control`
 
 A3: create (or refresh) Player Pool's own "add a player" row -- a type dropdown (Cash / GPP / Both, default Both) and a live search box (ONE_OF_RANGE validation) against EdgeRaw's Name column, pinned at the top of Player Pool itself, for when typing a name is faster than scrolling EdgeRaw to tick a checkbox (the "Pool picking" filter view, `dfs setup add-filters`, is the third way). Replaces the old separate `Pool Picks` tab (see `sheet_pool_control.py` and CONTRIBUTING.md's A3 changelog entry) -- Sam never wanted a second tab for this. The structural row-insert runs at most once per sheet (idempotent, see `ensure_pool_control_row`); safe to re-run any time, including as part of a future `dfs setup polish`.

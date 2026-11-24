@@ -307,6 +307,7 @@ MORE_LABELS = {
     "dfs setup instructions": "Rewrite the Instructions tab",
     "dfs setup link-edge": "Link EdgeRaw's columns into Player Pool and Lineups",
     "dfs setup reorder-columns": "Reorder the Pool/Lineups columns",
+    "dfs setup lineup-columns": "Fold Lineups down to its key columns",
     "dfs setup add-pool-control": "Add Player Pool's add-a-player row",
     "dfs setup dk-upload": "Build DK Upload's entries layout (Lineup dropdown, Suggested)",
     "dfs setup cockpit": "Create the read-only Cockpit tab (Sunday's last 90 minutes)",

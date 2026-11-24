@@ -292,7 +292,10 @@ class FakeSpreadsheet:
                 {
                     "properties": {"sheetId": ws.id},
                     "conditionalFormats": ws.conditional_formats,
-                    "columnGroups": [{"range": g["range"], "depth": g["depth"]} for g in ws.column_groups],
+                    "columnGroups": [
+                        {"range": g["range"], "depth": g["depth"], "collapsed": g.get("collapsed", False)}
+                        for g in ws.column_groups
+                    ],
                     "rowGroups": [
                         {"range": g["range"], "depth": g["depth"], "collapsed": g.get("collapsed", False)}
                         for g in ws.row_groups
@@ -1369,6 +1372,27 @@ def test_apply_row_groups_adds_outer_groups_first_then_sets_collapsed_innermost_
         (30, False),
     }
     client.apply_row_groups("T", [])  # nothing to do must not raise
+
+
+def test_apply_column_groups_nests_outer_first_and_read_column_groups_reports_depth(
+    cfg, monkeypatch, tmp_path
+):
+    client, fake_sheet = _client_with_fake_sheet(cfg, monkeypatch, tmp_path)
+    fake_sheet._worksheets["T"] = FakeWorksheet("T", rows=[["h"]])
+    # given inner-first on purpose: the order is the client's job (0-indexed, inclusive)
+    client.apply_column_groups("T", [(27, 37, 2, True), (23, 39, 1, True), (6, 6, 1, False)])
+    ws = fake_sheet._worksheets["T"]
+    adds = [(c["range"]["startIndex"], c["range"]["endIndex"]) for c in ws.dimension_group_calls]
+    assert set(adds[:2]) == {(6, 7), (23, 40)} and adds[2] == (27, 38)  # depth 1 first, then depth 2
+    assert all(c["range"]["dimension"] == "COLUMNS" for c in ws.dimension_group_calls)
+    updates = [u["dimensionGroup"]["depth"] for u in ws.dimension_group_update_calls]
+    assert updates == [2, 1, 1]  # collapsed flags: innermost first
+    assert {(first, last, collapsed) for first, last, _, collapsed in client.read_column_groups("T")} == {
+        (6, 6, False),
+        (23, 39, True),
+        (27, 37, True),
+    }
+    client.apply_column_groups("T", [])  # nothing to do must not raise
 
 
 def test_set_row_group_control_before_and_filter_view_id(cfg, monkeypatch, tmp_path):

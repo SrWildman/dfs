@@ -200,6 +200,7 @@ SECTIONS: list[tuple[str, str, list[str]]] = [
             "dfs setup instructions",
             "dfs setup link-edge",
             "dfs setup reorder-columns",
+            "dfs setup lineup-columns",
             "dfs setup add-pool-control",
             "dfs setup dk-upload",
             "dfs setup cockpit",

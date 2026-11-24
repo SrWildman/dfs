@@ -1544,6 +1544,68 @@ def sheets_link_edge(
 
     for line in results:
         console.print(f"[green]OK[/green] {line}")
+    # link_edge_columns cleared every column group on Lineups and rebuilt the zones alone: fold it again.
+    _refold_lineup_columns(client, cfg)
+
+
+def _refold_lineup_columns(client: SheetsClient, cfg: Config) -> None:
+    """Fold Lineups down to its visible columns again (`sheet_lineup_columns.fold`) after a command that
+    rebuilt its column groups. Fails soft: a problem prints a yellow line and `dfs setup lineup-columns`
+    redoes it."""
+    from dfs import sheet_lineup_columns
+    from dfs.lineup_columns import LineupColumnsError
+
+    try:
+        result = sheet_lineup_columns.fold(
+            client, cfg.lineups.builder_tab, header_row=LINEUPS_NAME_BLOCKS[0][0] - 1
+        )
+    except (SheetsError, LineupColumnsError) as e:
+        console.print(
+            f"[yellow]Lineups columns not folded again ({escape(str(e))}); "
+            "run `dfs setup lineup-columns`.[/yellow]"
+        )
+        return
+    console.print(f"[green]OK[/green] {result.lines()[0]}")
+
+
+@setup_app.command(
+    "lineup-columns", short_help="Fold Lineups down to its key columns (collapsed column groups)."
+)
+def setup_lineup_columns(
+    sheet_id: str = typer.Option(
+        None,
+        "--sheet-id",
+        help="Fold a different sheet instead of config.toml's, e.g. the canonical weekly template "
+        "(always the template first).",
+    ),
+) -> None:
+    """Show only the Lineups columns you build from (Name, Pos., Team, Opp., DK Sal, Pts, CalPts, Val, ValAdj,
+    Hit3x%, Boom%, Ceil, Own%, Flags, Edge, Issues, Leverage) and fold every other column into collapsed
+    column groups, found by header. Expand any group by hand with the + above the column letters; the GAME,
+    CEIL, MOVE, WX and USAGE zones stay groups of their own inside. Display only: nothing moves, is renamed or
+    is deleted. Safe to re-run (a tab already folded is left alone); it reads the result back and says what it
+    folded. Template first, then each live sheet (`--slate thu` for a secondary slate's)."""
+    from dfs import sheet_lineup_columns
+    from dfs.lineup_columns import LineupColumnsError
+
+    cfg = _load_config_or_exit()
+    client = SheetsClient(_gs_config(cfg, sheet_id))
+    try:
+        title, url = client.describe()
+        console.print(f"Folding the Lineups columns on: [bold]{title}[/bold]\n{url}\n")
+        result = sheet_lineup_columns.fold(
+            client, cfg.lineups.builder_tab, header_row=LINEUPS_NAME_BLOCKS[0][0] - 1
+        )
+    except LineupColumnsError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(code=1) from e
+    except SheetsError as e:
+        console.print(f"[red]Sheets error:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    lines = result.lines()
+    console.print(f"[green]OK[/green] {escape(lines[0])}")
+    for line in lines[1:]:
+        console.print(escape(line))
 
 
 @setup_app.command(
@@ -1667,6 +1729,8 @@ def sheets_reorder_columns(
 
     for line in results:
         console.print(f"[green]OK[/green] {line}")
+    # link_edge_columns (inside the Lineups migration) rebuilt its zones alone: fold it again.
+    _refold_lineup_columns(client, cfg)
 
 
 @setup_app.command(
