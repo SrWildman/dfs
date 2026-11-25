@@ -305,6 +305,9 @@ Cause: TFFB's Pace of Play article goes up on Wednesday; a source whose data for
 pending, not failed. Nothing is saved for it, the sync exits 0, and the slate-grid pace columns stay blank.
 Fix: nothing is wrong. Run `dfs sync` (or `dfs sync --only tffb_gps`) again after the article is up; the line
 goes away. A red `failed:` on the same source (an expired login, a changed page) is a real error: `dfs auth tffb`.
+On a secondary slate (`--slate thu`) the article is found by the slate's name (Thanksgiving, Black Friday,
+Saturday, Christmas). If it is up under a title the search doesn't recognise, paste its URL into config.toml as
+`[slates.<key>] gps_url = "<article URL>"` and sync again (it is used only for the table's `week`).
 
 ---
 

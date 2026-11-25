@@ -532,6 +532,19 @@ blank until the next sync after publication. Not in `LIVE_SYNC_SOURCES` --
 like `sos_*`/`snaps`/`pbp`, a weekly-cadence source has nothing new to gain
 from a fast live-sync pass.
 
+**A named slate.** Thanksgiving's article has no week number, so a secondary
+slate's article is the one that names it: its day word (`saturday`) or a
+holiday that falls on its date (Thanksgiving, the fourth Thursday of November;
+Black Friday, the day after; Christmas, December 25). An article that also
+names a week must name this week. The main slate keeps the `week N` match and
+never takes an article naming a secondary slate; in the playoffs (no week
+number: `nfl_calendar` stops at week 18) it takes the round of today's date,
+counted in whole weeks from week 18's Tuesday (1 Wild Card, 2 Divisional, 3
+Conference/Championship, 5 Super Bowl). `[slates.<key>] gps_url` overrides the
+search. A secondary slate keeps the CSV rows of its own DraftKings teams; a
+slate team the CSV lacks is a warning, and a CSV with none of them fails
+(another slate's article).
+
 ## OppEPA (Round 5 item 9, 2026-09-29)
 
 `OppPosRank` is TFFB's fantasy-points-allowed rank, and after three weeks

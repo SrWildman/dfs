@@ -21,6 +21,10 @@ credentials_file = "credentials.json"
 # [slates.thu]
 # sheet_id = "the-thanksgiving-copy-id"
 # week = 12
+# TFFB's Pace of Play (GPS) article for the slate is found by the slate's name (Thanksgiving, Saturday,
+# Christmas...). For a title it doesn't recognise, paste the article's URL here; it is used as is, for
+# the `week` above only.
+# gps_url = "https://www.thefantasyfootballers.com/dfs/pace-of-play-dfs-stacks-for-thanksgiving-day-slate/"
 
 # Maps each data source to the tab name it should be written to in your
 # sheet. Rename the values (right-hand side) to match your own tabs --

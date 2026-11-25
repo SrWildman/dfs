@@ -123,6 +123,13 @@ tffb_gps.py`'s module docstring). Weekly-cadence only -- not part of
 | `ImpliedTotal` | This team's own model-implied point total (a pace/EPA model's output, not a market). |
 | `GPS` | 1-5, this game's overall score -- includes the author's own judgement, not purely mechanical. |
 
+On a secondary slate's sheet (`--slate thu`), the slate's own teams only
+(Thanksgiving: 6): TFFB's slate article links the whole week's CSV, and the
+rows are kept to the teams in the slate's DraftKings salaries. The article is
+found by the slate's name (Thanksgiving, Black Friday, Saturday, Christmas;
+the playoff round on a playoff main slate), or by `[slates.<key>] gps_url`
+in config.toml when set.
+
 Blank (the whole tab) if this week's article isn't published yet --
 never falls back to last week's file. See `docs/CALCULATIONS.md`'s GPS
 section for where each of `ImpliedTotal`/`GPS` shows up elsewhere
