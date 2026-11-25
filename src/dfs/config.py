@@ -380,6 +380,10 @@ class SmallSlateConfig(BaseModel):
     hard_rules: bool = False
 
 
+# The only site `[slates.<key>] gps_url` may point at: the TFFB login profile reads it.
+TFFB_URL_PREFIX = "https://www.thefantasyfootballers.com/"
+
+
 class SlateSheetConfig(BaseModel):
     """`[slates.<key>]`: a secondary slate's sheet (`slate.py`)."""
 
@@ -389,6 +393,16 @@ class SlateSheetConfig(BaseModel):
     # The NFL week the sheet is for (`dfs week new --slate` writes it): which week's entries are this slate's
     # (`slate_chain`). Left out (a sheet set up before it existed), the sheet's own title says.
     week: int | None = None
+    # TFFB's Pace of Play article for this slate (`sources/tffb_gps.py`), used as is instead of searching the
+    # listing: for a title the search doesn't recognise. A TFFB page only (read through Sam's TFFB login).
+    gps_url: str | None = None
+
+    @field_validator("gps_url")
+    @classmethod
+    def _tffb_gps_url(cls, value: str | None) -> str | None:
+        if value is not None and not value.startswith(TFFB_URL_PREFIX):
+            raise ValueError(f"gps_url must be a TFFB article ({TFFB_URL_PREFIX}...), got {value!r}")
+        return value
 
 
 class LearningConfig(BaseModel):

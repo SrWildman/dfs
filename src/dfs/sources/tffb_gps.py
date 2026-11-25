@@ -52,12 +52,40 @@ published yet" -- never return a partial frame). It's whoever reads this source'
 back (`derived.py`'s `_attach_gps`, `sheet_views.py`'s Slate Grid/Board
 formulas) that degrades gracefully to blank columns when there's nothing
 on disk yet, the same pattern `pbp`/`team_metrics` already established.
+
+**A named slate (2026-11-24).** Thanksgiving's article carries no week number
+(`pace-of-play-dfs-stacks-for-thanksgiving-day-slate`), so the article is found by
+the slate it names, not only the week (`_is_pace_of_play_link`):
+
+- **The main slate** keeps the `week N` match, and never takes an article that
+  names a secondary slate (a day, Thanksgiving, Black Friday, Christmas), so a
+  "Week 12 Thanksgiving" article is never the main slate's. In the playoffs
+  (`nfl_calendar` stops at week 18, so there is no week number) it takes the
+  article that names the round of today's date (`playoff_round`).
+- **A secondary slate** (`slate.py`) takes an article that names it: its day
+  (`saturday`) or a holiday on its date (Thanksgiving, Black Friday, Christmas).
+  An article that also names a week must name this week, one that names a playoff
+  round must name this round, and one that names another day's slate is not its.
+- **`[slates.<key>] gps_url`** in config.toml is used as is, without the listing,
+  for any title the matcher doesn't know.
+
+**Fewer teams.** Thanksgiving's article (checked live 2026-11-24) links the whole
+week's CSV, 32 teams with a `SLATE` column (`THANKS`, `BLACK`, `MAIN`, `SNF`, ...).
+A secondary slate keeps only its own teams, the ones in its DraftKings salaries
+(`keep_slate_teams`; Sam, Nov 24: by the salaries, not TFFB's `SLATE` labels), so
+Thanksgiving's GPSRaw has 6 rows; any row count above zero is fine. With no salaries
+saved yet every row is kept, with a warning. The main slate keeps every row, as
+before. Either way the CSV is checked against the slate's salaries
+(`check_slate_teams`): a slate team it lacks is a warning, and a CSV with none of
+the slate's teams is another slate's article and fails.
 """
 
 from __future__ import annotations
 
 import io
 import re
+from collections.abc import Iterable
+from datetime import date
 
 import pandas as pd
 from playwright.sync_api import Page
@@ -113,24 +141,117 @@ class TffbGpsPending(SourcePending, TffbGpsFetchError):
     failed. Still a `TffbGpsFetchError`, so a caller that catches the family keeps working."""
 
 
-def _is_pace_of_play_link(href: str, text: str, week: int) -> bool:
-    """True if this link's href or text is Kyle Borg's Pace of Play
-    article for `week` -- matched on `-week-{N}(-|/|$)` (a real word
-    boundary, not a bare substring) so week 1 never matches week 10-19,
-    since neither the slug nor the CSV filename follows a stable pattern
-    otherwise (confirmed live: Week 1's slug started `nfl-dfs-pace-of-play-
-    stacks-for-week-1-...`, Week 2/3's started `pace-of-play-matchups-
-    stacks-for-week-N-...` -- different prefixes, "pace-of-play" and a
-    week-boundary are the only two things both shapes share)."""
-    haystack = f"{href} {text}".lower()
-    if "pace-of-play" not in haystack and "pace of play" not in haystack:
+# The words an article's slug or title names a secondary slate with: its day (`slate.DAYS` keys)...
+DAY_ARTICLE_WORDS: dict[str, tuple[str, ...]] = {
+    "mon": ("monday",),
+    "tue": ("tuesday",),
+    "wed": ("wednesday",),
+    "thu": ("thursday",),
+    "fri": ("friday",),
+    "sat": ("saturday",),
+}
+# ...or a holiday on its date (`holidays_on`).
+HOLIDAY_WORDS: dict[str, tuple[str, ...]] = {
+    "thanksgiving": ("thanksgiving",),
+    "black friday": ("black friday",),
+    "christmas": ("christmas", "xmas"),
+}
+# The playoff rounds, by weeks after week 18's start (`playoff_round`); week 4 after is the Super Bowl's bye.
+PLAYOFF_ROUNDS: dict[int, tuple[str, ...]] = {
+    1: ("wild card", "wildcard"),
+    2: ("divisional",),
+    3: ("conference", "championship"),
+    5: ("super bowl",),
+}
+_TAG_RE = re.compile(r"<[^>]*>")
+_WEEK_RE = re.compile(r"week[\s-]+([0-9]+)(?![0-9])")
+
+
+def holidays_on(day: date) -> set[str]:
+    """The `HOLIDAY_WORDS` holidays that fall on `day`: Thanksgiving (the fourth Thursday of November),
+    Black Friday (the day after it), Christmas (December 25)."""
+    out: set[str] = set()
+    if day.month == 11 and day.weekday() == 3 and 22 <= day.day <= 28:
+        out.add("thanksgiving")
+    if day.month == 11 and day.weekday() == 4 and 23 <= day.day <= 29:
+        out.add("black friday")
+    if day.month == 12 and day.day == 25:
+        out.add("christmas")
+    return out
+
+
+def playoff_round(today: date, season: int) -> int | None:
+    """The `PLAYOFF_ROUNDS` key of `today` (1 Wild Card ... 5 Super Bowl), counted in whole weeks from week
+    18's Tuesday start, the same anchor every NFL week uses; None in the regular season or the bye week."""
+    from dfs import nfl_calendar
+
+    weeks_after = (today - nfl_calendar.week_start_date(nfl_calendar.MAX_WEEK, season)).days // 7
+    return weeks_after if weeks_after in PLAYOFF_ROUNDS else None
+
+
+def _named(haystack: str, words: Iterable[str]) -> bool:
+    return any(re.search(rf"(?<![a-z]){re.escape(w)}(?![a-z])", haystack) for w in words)
+
+
+def _haystack(href: str, text: str) -> str:
+    """The link's href and its text (any markup in it dropped: a card's image tag carries a file name), lower
+    case, with the slug's hyphens as spaces."""
+    return f"{href} {_TAG_RE.sub(' ', text)}".lower().replace("-", " ").replace("_", " ")
+
+
+def _is_pace_of_play_link(
+    href: str,
+    text: str,
+    week: int,
+    *,
+    key: str = "main",
+    slate_day: date | None = None,
+    round_no: int | None = None,
+) -> bool:
+    """True if this link's href or text is Kyle Borg's Pace of Play article for slate `key` of `week`.
+
+    **Main** (`key="main"`): `week N` (a real word boundary, so week 1 never matches week 10-19: Week 1's slug
+    started `nfl-dfs-pace-of-play-stacks-for-week-1-...`, Week 2/3's `pace-of-play-matchups-stacks-for-week-N-
+    ...`; "pace of play" and a week boundary are the only two things both shapes share), and no secondary
+    slate named (`DAY_ARTICLE_WORDS`, `HOLIDAY_WORDS`), so a "Week 12 Thanksgiving" article is never main's.
+    In the playoffs (`round_no`, from `playoff_round`) the round's name instead of the week.
+
+    **A secondary slate** (`key` a `slate.DAYS` key, `slate_day` its date): its day word, or a holiday that
+    falls on `slate_day`. An article naming two slates ("Thanksgiving & Black Friday") is each one's. Not
+    last week's: a week number, if named, is `week`; in the playoffs a round, if named, is `round_no`."""
+    haystack = _haystack(href, text)
+    if "pace of play" not in haystack:
         return False
-    return re.search(rf"week[\s-]{week}(?![0-9])", haystack) is not None
+    weeks = {int(n) for n in _WEEK_RE.findall(haystack)}
+    rounds = {r for r, words in PLAYOFF_ROUNDS.items() if _named(haystack, words)}
+    days = {k for k, words in DAY_ARTICLE_WORDS.items() if _named(haystack, words)}
+    holidays = {h for h, words in HOLIDAY_WORDS.items() if _named(haystack, words)}
+
+    if key == "main":
+        if days or holidays:
+            return False
+        if round_no is not None:
+            return rounds == {round_no}
+        return week in weeks
+
+    own_holidays = holidays & holidays_on(slate_day) if slate_day is not None else set()
+    if key not in days and not own_holidays:
+        return False
+    if weeks and weeks != {week}:
+        return False
+    return round_no is None or rounds <= {round_no}
 
 
-def _find_article_url(page: Page, week: int) -> str | None:
+def _find_article_url(
+    page: Page,
+    week: int,
+    *,
+    key: str = "main",
+    slate_day: date | None = None,
+    round_no: int | None = None,
+) -> str | None:
     """Search TFFB's own `/dfs/` listing (never a constructed slug -- see
-    module docstring) for this week's Pace of Play article. `None` if not
+    module docstring) for this slate's Pace of Play article. `None` if not
     found after searching `_LISTING_PAGES_TO_SEARCH` pages -- the caller
     turns that into "not published yet"."""
     for page_num in range(1, _LISTING_PAGES_TO_SEARCH + 1):
@@ -138,9 +259,67 @@ def _find_article_url(page: Page, week: int) -> str | None:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         links = page.eval_on_selector_all("a", "els => els.map(e => [e.href, e.textContent.trim()])")
         for href, text in links:
-            if _is_pace_of_play_link(href, text, week):
+            if _is_pace_of_play_link(href, text, week, key=key, slate_day=slate_day, round_no=round_no):
                 return href
     return None
+
+
+def override_url(key: str, week: int) -> str | None:
+    """`[slates.<key>] gps_url` from config.toml, used as is; None on the main slate, when it is not set, or
+    when config.toml cannot be read. Only for the week the table is for (its `week`, which `dfs week new
+    --slate` rewrites): a Saturday's URL left in config.toml is never next Saturday's article."""
+    if key == "main":
+        return None
+    try:
+        from dfs.config import load_base_config
+
+        entry = load_base_config().slates.get(key)
+    except Exception:  # noqa: BLE001 - no config: no override, the listing search runs
+        return None
+    if entry is None or not entry.gps_url:
+        return None
+    if entry.week is not None and entry.week != week:
+        log.warning(
+            "GPS: [slates.%s] gps_url is for week %s, not week %s: ignored (searching the listing)",
+            key,
+            entry.week,
+            week,
+        )
+        return None
+    return entry.gps_url
+
+
+def check_slate_teams(gps: pd.DataFrame, slate_teams: Iterable[str]) -> list[str]:
+    """The slate's teams (its DraftKings salaries' `TeamAbbrev`) missing from the GPS CSV, sorted; the
+    caller warns for each. Raises TffbGpsFetchError when the CSV has none of them at all: that is another
+    slate's article (last week's Saturday, the main slate's), never this one's. No slate teams known: []."""
+    want = {normalize_team(t) for t in slate_teams if str(t).strip()}
+    if not want:
+        return []
+    have = {t for t in gps["Team"] if t}
+    if not want & have:
+        raise TffbGpsFetchError(
+            f"The GPS CSV has none of this slate's teams ({', '.join(sorted(want))}; it has "
+            f"{', '.join(sorted(have)) or 'none'}): it is another slate's article. Sync draftkings first "
+            "if its file is old, or set [slates.<key>] gps_url."
+        )
+    return sorted(want - have)
+
+
+def keep_slate_teams(gps: pd.DataFrame, slate_teams: Iterable[str]) -> pd.DataFrame:
+    """The GPS rows of the slate's teams (its DraftKings salaries' `TeamAbbrev`), in the CSV's order."""
+    want = {normalize_team(t) for t in slate_teams if str(t).strip()}
+    return gps[gps["Team"].isin(want)].reset_index(drop=True)
+
+
+def _slate_teams() -> list[str]:
+    """The active slate's DraftKings teams from its saved salaries; [] when there are none yet."""
+    from dfs import store
+
+    try:
+        return [str(t) for t in store.load_current("draftkings")["TeamAbbrev"].dropna()]
+    except (FileNotFoundError, KeyError, ValueError):
+        return []
 
 
 def _find_csv_url(page: Page, article_url: str) -> str | None:
@@ -201,16 +380,31 @@ class TffbGpsSource(Source):
     needs_auth = True
 
     def fetch(self, ctx: SyncContext) -> pd.DataFrame:
-        log.info("fetching TFFB Pace of Play (GPS) for week %s", ctx.week)
+        from dfs import slate
+
+        key = slate.current()
+        on = "" if key == slate.MAIN else f"the {slate.label(key)} slate of "
+        log.info("fetching TFFB Pace of Play (GPS) for %sweek %s", on, ctx.week)
+        slate_day = None if key == slate.MAIN else slate.slate_date(key, ctx.season, ctx.week)
+        round_no = playoff_round(date.today(), ctx.season)
+        override = override_url(key, ctx.week)
         with persistent_context("tffb", headless=True) as context:
             page = context.new_page()
             try:
-                article_url = _find_article_url(page, ctx.week)
+                if override:
+                    log.info("GPS: using [slates.%s] gps_url %s", key, override)
+                    article_url = override
+                else:
+                    article_url = _find_article_url(
+                        page, ctx.week, key=key, slate_day=slate_day, round_no=round_no
+                    )
                 if article_url is None:
                     raise TffbGpsPending(
-                        f"GPS not published for Week {ctx.week} yet -- no matching article found "
+                        f"GPS not published for {on}Week {ctx.week} yet -- no matching article found "
                         f"in TFFB's {LISTING_URL} listing."
+                        + ("" if key == slate.MAIN else f" (Set [slates.{key}] gps_url if it is up.)")
                     )
+                log.info("GPS article: %s", article_url)
                 csv_url = _find_csv_url(page, article_url)
                 if csv_url is None:
                     raise TffbGpsFetchError(f"No .csv link found in the GPS article body at {article_url}.")
@@ -232,4 +426,17 @@ class TffbGpsSource(Source):
         unmatched = df.loc[df["Team"] == "", "Team"]
         if len(unmatched):
             log.warning("GPS: %d row(s) had no parseable team code", len(unmatched))
+        teams = _slate_teams()
+        for team in check_slate_teams(df, teams):
+            log.warning("GPS: slate team %s is not in the Pace of Play CSV (its GPS stays blank)", team)
+        if key != slate.MAIN:
+            if teams:
+                df = keep_slate_teams(df, teams)
+            else:
+                log.warning(
+                    "GPS: no DraftKings salaries saved for the %s slate yet, so all %d rows are kept "
+                    "(sync draftkings, then tffb_gps, to keep the slate's own teams)",
+                    slate.label(key),
+                    len(df),
+                )
         return df
