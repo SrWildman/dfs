@@ -115,6 +115,10 @@ def cash_line_from_results(header: list, rows: list[list], *, before_week: int) 
     )
 
 
+# A small slate with no ownership yet: the fixed cash line is the main slate's typed one, never this slate's.
+SMALL_FALLBACK_NOTE = "small slate: line not calibrated"
+
+
 @dataclass(frozen=True)
 class SimLines:
     """What the simulator scores lineups against, and how to say so.
@@ -150,6 +154,8 @@ class SimLines:
         """The line on the Suggested tab: what the Cash % and Top 1% numbers were measured against."""
         field = self.shown_field
         if field is None:
+            if self.small:
+                return f"{SMALL_FALLBACK_NOTE}  ·  cash line {self.cash_line:g} is the main slate's"
             return f"cash line {self.cash_line:g}  ·  GPP target {self.gpp_target:g}  ·  {self.mode} lines"
         if self.small:
             return (
@@ -222,6 +228,19 @@ def resolve_lines(
         cash_line = lines.fallback_cash_line if lines.fallback_cash_line is not None else cash.value
         top_line = lines.fallback_top1_line if lines.fallback_top1_line is not None else gpp_target
         source = "[sim.lines] fallback" if lines.fallback_cash_line is not None else cash.note
+        if small_slate.frame_is_small(edge):  # the main slate's typed line is not this slate's: say so
+            return SimLines(
+                "fallback",
+                cash_line,
+                top_line,
+                None,
+                f"Ownership has not published (Own% is blank), and {SMALL_FALLBACK_NOTE}: cash line "
+                f"{cash_line:g} ({source}) stands in only to rank builds, with a {top_line:g}-point top-end "
+                "line.",
+                f"{SMALL_FALLBACK_NOTE} (ownership not published yet)",
+                gpp_label(top_line),
+                small=True,
+            )
         return SimLines(
             "fallback",
             cash_line,
