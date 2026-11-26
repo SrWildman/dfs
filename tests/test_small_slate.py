@@ -334,9 +334,34 @@ def _with_cut(call, cut):
 def test_the_sim_lines_say_a_small_slate_s_line_is_not_calibrated():
     from dfs.sim_inputs import SimLines
 
-    lines = SimLines("relative", 110.0, 150.0, None, "", "", "Top 1%", small=True)
-    assert lines.status.startswith("cash line")  # no field: the fixed wording, small or not
+    lines = SimLines("fallback", 110.0, 150.0, None, "", "", "Top 1%", small=True)
+    assert lines.status.startswith("small slate: line not calibrated")  # no field yet: still not this slate's
+    assert SimLines("fallback", 110.0, 150.0, None, "", "", "Top 1%").status.startswith("cash line")  # main
     assert small_slate.CASH_LINE_NOTE.startswith("small slate: line not calibrated")
+
+
+def test_a_small_slate_without_ownership_never_shows_the_main_slate_s_line_as_its_own():
+    from dfs import config as C
+    from dfs import sim_inputs as si
+
+    cash = si.CashLine(137.18, (2, 4), "season median of your typed Cash Line, Weeks 2, 4")
+
+    def blank(games):
+        rows = pd.DataFrame(slate_rows(games))
+        return rows.assign(Id=[str(k) for k in range(len(rows))], **{"Own%": np.nan})
+
+    sync_draft_group(THANKSGIVING)
+    edge = blank(THANKSGIVING)
+    lines = si.resolve_lines(edge, si.build_specs(edge), cash, 190.0, C.SimLinesConfig())
+    assert lines.mode == "fallback" and lines.field is None and lines.small
+    note = "small slate: line not calibrated"
+    assert note in lines.note and note in lines.status
+    assert lines.cash_basis.startswith(note) and "137.18" not in lines.cash_basis
+    sync_draft_group(MAIN_GAMES)  # a main slate: the fixed wording, exactly as before
+    edge = blank(MAIN_GAMES)
+    lines = si.resolve_lines(edge, si.build_specs(edge), cash, 190.0, C.SimLinesConfig())
+    assert not lines.small and "FIXED lines, cash line 137.18" in lines.note
+    assert lines.cash_basis == "cash line 137.18, fixed (ownership not published yet)"
 
 
 def test_the_run_line_names_what_a_small_slate_turns_off():

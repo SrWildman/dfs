@@ -194,6 +194,12 @@ SPLIT_TFFB_LOW = "TFFB↓"  # TFFB projects this player lower than Sleeper/Fanta
 # ValAdj (Fix 2) and the same fix: measure the share against the pool, not
 # the full DK list.
 OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5
+# Thanksgiving hotfix (2026-11-25): on a small slate the rosterable pool is nearly every player DK lists
+# (3 games, 154 players), and TFFB still publishes only for the likely-rostered ones: 73 of ~148, 49%, so
+# the share rule above never passed and every Own% stayed blank. Ownership also counts as published when
+# the slate's ProjOwn (fractions) sums to two-thirds of DraftKings' 900% (9 roster spots). A partial early
+# publish (a handful of players) stays well under it.
+OWNERSHIP_PUBLISHED_SUM_THRESHOLD = 6.0
 OUT_STATUSES = frozenset({"OUT", "IR"})
 # Mirrors sources/weather.py's WIND_FLAG_THRESHOLD_MPH. Duplicated rather
 # than imported so derived.py (pure, source-agnostic logic) never depends
@@ -1278,6 +1284,16 @@ def _flags_for_row(row: pd.Series, chalk: float = CHALK_OWNERSHIP_THRESHOLD) -> 
     return flags
 
 
+def ownership_published(pool_own: pd.Series, slate_own: pd.Series) -> bool:
+    """TFFB's ownership counts as published when most of the rosterable pool has a ProjOwn
+    (`OWNERSHIP_PUBLISHED_SHARE_THRESHOLD`), or the whole slate's ProjOwn (fractions) sums to
+    `OWNERSHIP_PUBLISHED_SUM_THRESHOLD` (a small slate, whose pool is nearly every player listed)."""
+    if pool_own.fillna(0).gt(0).mean() > OWNERSHIP_PUBLISHED_SHARE_THRESHOLD:
+        return True
+    total = float(pd.to_numeric(slate_own, errors="coerce").fillna(0).clip(lower=0).sum())
+    return round(total, 6) >= OWNERSHIP_PUBLISHED_SUM_THRESHOLD  # rounded: a sum of exactly 6.0 counts
+
+
 def build_edge_frame(
     projections: pd.DataFrame,
     salaries: pd.DataFrame,
@@ -1378,7 +1394,7 @@ def build_edge_frame(
     # player DK lists -- see OWNERSHIP_PUBLISHED_SHARE_THRESHOLD's own
     # comment for why the full-list denominator can never cross 0.5.
     pool_projown = merged.loc[val_adj_pool, "ProjOwn"]
-    has_real_ownership = pool_projown.fillna(0).gt(0).mean() > OWNERSHIP_PUBLISHED_SHARE_THRESHOLD
+    has_real_ownership = ownership_published(pool_projown, merged["ProjOwn"])
     merged["OwnStatus"] = OWN_STATUS_REAL if has_real_ownership else OWN_STATUS_UNPUBLISHED
     if has_real_ownership:
         merged["OwnPct"] = _percentile_within(merged["ProjOwn"], merged["Position"]).round(1)

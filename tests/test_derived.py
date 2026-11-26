@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from dfs import derived
 from dfs.derived import (
@@ -235,6 +236,51 @@ def test_ownership_published_share_still_reads_unpublished_when_the_whole_pool_i
 
     assert (frame["OwnStatus"] == OWN_STATUS_UNPUBLISHED).all()
     assert frame["Leverage"].isna().all()
+
+
+def _three_game_slate(owned: int, own_each: float) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A 3-game slate's 48 players (8 a team, all inside the rosterable pool): `owned` of them with `own_each`
+    ProjOwn (TFFB's percent scale) and the rest 0, as TFFB publishes for the likely-rostered only."""
+    teams = ["DET", "GB", "DAL", "KC", "BAL", "CIN"]
+    positions = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "DST"]
+    rows = [
+        {"Id": str(k), "Name": f"P{k}", "Position": pos, "Team": team, "ProjPts": 20.0 - j, "Ceiling": 30 - j}
+        for k, (team, j, pos) in enumerate((t, j, p) for t in teams for j, p in enumerate(positions))
+    ]
+    for k, row in enumerate(rows):
+        row["ProjOwn"] = own_each if k % 2 == 0 and k // 2 < owned else 0.0
+    salaries = _salaries([{"ID": r["Id"], "Position": r["Position"], "TeamAbbrev": r["Team"]} for r in rows])
+    return _projections(rows), salaries
+
+
+def test_a_small_slate_with_half_its_players_owned_reads_published_by_the_ownership_sum():
+    # Thanksgiving 2026: on a 3-game slate the rosterable pool is nearly every player listed, and TFFB
+    # publishes only for about half of them (73 of 148), so the pool-share rule alone never passed.
+    proj, sal = _three_game_slate(owned=24, own_each=37.5)  # 24 of 48 owned, summing to 900% (9.0)
+    frame = build_edge_frame(proj, sal).frame
+    pool = _rosterable_pool_mask(frame["ProjPts"], frame["Position"])
+    assert pool.all() and (frame.loc[pool, "Own%"] > 0).mean() == 0.5  # the share rule alone: not over 0.5
+    assert frame["Own%"].sum() == pytest.approx(9.0)
+    assert (frame["OwnStatus"] == OWN_STATUS_REAL).all()
+    assert frame["Own%"].notna().all() and frame["Leverage"].notna().any()
+
+
+def test_an_early_partial_publish_on_a_small_slate_still_reads_unpublished():
+    proj, sal = _three_game_slate(owned=10, own_each=12.0)  # 10 players summing to 120% (1.2)
+    frame = build_edge_frame(proj, sal).frame
+    assert (frame["OwnStatus"] == OWN_STATUS_UNPUBLISHED).all()
+    assert frame["Own%"].isna().all() and frame["Leverage"].isna().all()
+
+
+def test_ownership_published_takes_either_the_pool_share_or_the_slate_sum():
+    from dfs.derived import OWNERSHIP_PUBLISHED_SUM_THRESHOLD, ownership_published
+
+    assert OWNERSHIP_PUBLISHED_SUM_THRESHOLD == 6.0  # two-thirds of DraftKings' 900%
+    half = pd.Series([0.3, 0.0] * 10)  # half the pool owned, summing to 3.0: neither rule
+    assert not ownership_published(half, half)
+    assert ownership_published(half, pd.Series([0.6, 0.0] * 10))  # the slate sums to 6.0
+    assert ownership_published(pd.Series([0.01] * 3 + [0.0]), pd.Series([0.01] * 3))  # the share alone
+    assert not ownership_published(pd.Series([0.0] * 4), pd.Series([float("nan")] * 4))
 
 
 def test_ownpct_is_percentile_rank_of_projown_within_position_not_raw_percentage():

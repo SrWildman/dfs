@@ -321,7 +321,13 @@ effect, computed once for the whole frame (not per player): `"real"` once
 ownership is published for **more than half of the rosterable pool**
 (`OWNERSHIP_PUBLISHED_SHARE_THRESHOLD = 0.5`, measured over
 `VAL_ADJ_ROSTERABLE_TOP_N`, the same reference population `ValAdj` uses),
-else `"unpublished"`. It has exactly one job now: a data-freshness marker
+**or** once the slate's `ProjOwn` (fractions) sums to at least
+`OWNERSHIP_PUBLISHED_SUM_THRESHOLD = 6.0` (two-thirds of DraftKings' 900%),
+else `"unpublished"` (`derived.ownership_published`). The sum is for a small
+slate, whose pool is nearly every player listed while TFFB publishes only for
+the likely-rostered: Thanksgiving 2026 had 73 of 148 owned (49%, under the
+share rule) summing to 933%. A partial early publish (10 players, 120%) stays
+unpublished; on every 2026 main-slate snapshot the result is unchanged. It has exactly one job now: a data-freshness marker
 telling you whether ownership has been published yet, not a second
 formula to reason about.
 
@@ -2677,6 +2683,9 @@ everywhere below.
 - **The cash line.** The same mechanics (the field average from the slate's own ownership, +`double_up_offset`), so the
   builds still have a line to score against, but it is said to be **not calibrated**: the offset was fitted on main slates.
   The Default's band has no word on a small slate ("small slate: line not calibrated; cash builds have cashed N of M").
+  Before the slate's ownership publishes, the fixed fallback line (the main slate's typed cash line) still ranks the
+  builds, but it is said to be "small slate: line not calibrated", never shown as this slate's line
+  (`sim_inputs.SMALL_FALLBACK_NOTE`).
 - **The GPP ownership meter** (`lineup_watch`; the `lineups suggest` warnings and the Cockpit's lineup warnings). On a
   main slate a GPP-marked lineup is warned outside 125%-145% summed `Own%`, a band around the field's average lineup
   (`field_own_sum` = `sum(Own%^2)`: 0.97-1.68 on the 2026 main slates, median `MAIN_FIELD_OWN_SUM` = 1.31). On a small
